@@ -17,6 +17,81 @@ const timerLockKey = (sessionId: string, questionIndex: number) =>
 export const timerDeadlineKey = (sessionId: string) =>
     `quiz:deadline:${sessionId}`;
 
+// Which question is in flight, so an early finish can prove it is closing the
+// question it meant to and not one that already moved on.
+const currentQuestionKey = (sessionId: string) =>
+    `quiz:current-q:${sessionId}`;
+
+/**
+ * Close the question in flight: stop the countdown, reveal the answers, then
+ * send the standings.
+ *
+ * Called both by the countdown reaching zero and by everyone answering early.
+ * The Redis delete is what settles a race between those two — `del` returns
+ * the number of keys it actually removed, so whichever path gets there first
+ * removes the deadline and the other sees 0 and stops. Without that, a last
+ * answer landing on the final tick would reveal the results twice.
+ */
+async function finishQuestion(sessionId: string, questionIndex: number) {
+    const lockKey = timerLockKey(sessionId, questionIndex);
+
+    // Claim the close. Only the caller that actually removed the deadline
+    // proceeds; anyone else lost the race and must do nothing.
+    const claimed = await cache.del(timerDeadlineKey(sessionId));
+    if (claimed === 0) return;
+
+    const localTimer = sessionTimers.get(sessionId);
+    if (localTimer) {
+        clearInterval(localTimer);
+        sessionTimers.delete(sessionId);
+    }
+
+    // Release the question lock so the next question can start.
+    await cache.del(lockKey, currentQuestionKey(sessionId));
+
+    const questions = await getCachedQuestions(sessionId);
+    const question = questions[questionIndex];
+    if (!question) return;
+
+    await invalidateLeaderboard(sessionId);
+    const leaderboard = await getCachedLeaderboard(sessionId);
+
+    broadcastToSession(sessionId, 'quiz:question-results', {
+        correctAnswers: question.answers
+            .filter((a: any) => a.isCorrect)
+            .map((a: any) => a.id),
+    });
+
+    setTimeout(() => {
+        broadcastToSession(sessionId, 'quiz:leaderboard', { leaderboard });
+    }, 2_000);
+}
+
+/**
+ * End the current question early because everyone present has answered.
+ *
+ * Waiting out a 20s limit when all 200 people answered by 14s is dead air, so
+ * the question closes once nobody is left to answer. The short delay keeps it
+ * from cutting off the moment the last person clicks, and gives an answer
+ * still in flight on a slow connection a chance to land.
+ */
+export async function finishQuestionEarly(sessionId: string, questionIndex: number) {
+    // Only end early while this question is genuinely the live one: the
+    // deadline is deleted the moment it closes by any route.
+    const [deadline, current] = await Promise.all([
+        cache.get(timerDeadlineKey(sessionId)),
+        cache.get(currentQuestionKey(sessionId)),
+    ]);
+    if (!deadline) return;
+    if (current !== null && Number(current) !== questionIndex) return;
+
+    setTimeout(() => {
+        finishQuestion(sessionId, questionIndex).catch((err) =>
+            console.error('[timer] early finish failed', err),
+        );
+    }, 1_500);
+}
+
 export async function startQuestionTimer(
     sessionId: string,
     questionIndex: number,
@@ -58,6 +133,13 @@ export async function startQuestionTimer(
         'EX', question.timeLimit + 10,
     );
 
+    // Lets an early finish confirm it is closing the question still in flight.
+    await cache.set(
+        currentQuestionKey(sessionId),
+        String(questionIndex),
+        'EX', question.timeLimit + 10,
+    );
+
     broadcastToSession(sessionId, 'quiz:timer-tick', { timeLeft });
 
     const timer = setInterval(async () => {
@@ -65,26 +147,9 @@ export async function startQuestionTimer(
         broadcastToSession(sessionId, 'quiz:timer-tick', { timeLeft });
 
         if (timeLeft <= 0) {
-            clearInterval(timer);
-            sessionTimers.delete(sessionId);
-
-            // Release the lock immediately so a new question can start.
-            // The deadline goes with it: the question is over, so a rejoin
-            // from here on should see results, not a live countdown.
-            await cache.del(lockKey, timerDeadlineKey(sessionId));
-
-            await invalidateLeaderboard(sessionId);
-            const leaderboard = await getCachedLeaderboard(sessionId);
-
-            broadcastToSession(sessionId, 'quiz:question-results', {
-                correctAnswers: question.answers
-                    .filter((a: any) => a.isCorrect)
-                    .map((a: any) => a.id),
-            });
-
-            setTimeout(() => {
-                broadcastToSession(sessionId, 'quiz:leaderboard', { leaderboard });
-            }, 2_000);
+            // Same close as an early finish, so the two cannot diverge; the
+            // deadline delete inside settles which of them gets there first.
+            await finishQuestion(sessionId, questionIndex);
         }
     }, 1_000);
 
