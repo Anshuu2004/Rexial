@@ -5,6 +5,7 @@ import { getCachedQuestions, getCachedLeaderboard,
          invalidateLeaderboard } from './cache.js';
 import { broadcastToSession } from './broadcastTosession.js';
 import { sessionTimers } from '../clients/index.js';
+import { flushSession } from './answerQueue.js';
 
 // Redis key that marks "a timer is already running for this question"
 const timerLockKey = (sessionId: string, questionIndex: number) =>
@@ -52,6 +53,18 @@ async function finishQuestion(sessionId: string, questionIndex: number) {
     const questions = await getCachedQuestions(sessionId);
     const question = questions[questionIndex];
     if (!question) return;
+
+    // Write anything still buffered before reading standings: answers are
+    // queued and flushed in batches, so the leaderboard would otherwise be
+    // built from an incomplete picture and show stale scores at exactly the
+    // moment everyone is looking at it.
+    try {
+        await flushSession(sessionId);
+    } catch (err) {
+        // Already logged and requeued; better a slightly stale board than no
+        // results at all.
+        console.error('[timer] flush before results failed', err);
+    }
 
     await invalidateLeaderboard(sessionId);
     const leaderboard = await getCachedLeaderboard(sessionId);
