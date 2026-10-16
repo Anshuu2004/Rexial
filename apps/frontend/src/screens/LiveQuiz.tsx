@@ -1,6 +1,6 @@
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { useAuthStore } from "../store/authStore";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { LuUserSearch } from "react-icons/lu";
 import { getAvatar, getAvatarColor } from "../utils/Avatars";
 import { BiCheckCircle, BiXCircle } from "react-icons/bi";
@@ -51,20 +51,69 @@ function LiveQuiz({ isOrganizer = false }: LiveQuizProps) {
 
 
 
+  // How many in the room have answered the question in flight. Reset on each
+  // new question so the previous one's tally never shows against a fresh one.
+  const [answerProgress, setAnswerProgress] =
+    useState<{ answered: number; total: number } | null>(null);
+  // Read inside the socket handler, which closes over its first render: a
+  // ref sees the question actually on screen, state would not.
+  const currentQuestionIdRef = useRef<string | null>(null);
+
+  // The few most recent answerers, shown as avatars popping onto the bar.
+  // Capped because at 500 players every answer would otherwise mount a node,
+  // and only the last handful are legible anyway.
+  const [recentAnswerers, setRecentAnswerers] = useState<string[]>([]);
+  const RECENT_AVATARS = 8;
+
   const [selectedAnswer, setSelectedAnswer] = useState<string | null>(null);
   const [questionStartTime, setQuestionStartTime] = useState<number>(0);
   const [qIndex, setQIndex] = useState(0);
 
 
-  const sortedLeaderboard = [...leaderboard].sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
+  // Scores are whole numbers 10..1 per question, so ties are common. The
+  // server already ranks by score and then by total answer time; re-sorting
+  // on score alone here would throw that tiebreak away and leave equal scores
+  // in arbitrary order, so fall back to the same key it used.
+  const sortedLeaderboard = [...leaderboard].sort(
+    (a, b) =>
+      (b.score ?? 0) - (a.score ?? 0) ||
+      (a.totalTimeMs ?? Infinity) - (b.totalTimeMs ?? Infinity)
+  );
 
+  // Laid out 2nd - 1st - 3rd so the winner stands in the middle, the way a
+  // real podium reads. Source order is the display order on desktop; on
+  // mobile the row becomes a column, so `order` puts 1st back on top.
   const podium = [
-    { rank: 1, player: sortedLeaderboard[0] },
-    { rank: 2, player: sortedLeaderboard[1] },
-    { rank: 3, player: sortedLeaderboard[2] },
-  ].filter((entry): entry is { rank: number; player: any } => Boolean(entry.player));
+    { rank: 2, player: sortedLeaderboard[1], order: 'order-2 sm:order-1' },
+    { rank: 1, player: sortedLeaderboard[0], order: 'order-1 sm:order-2' },
+    { rank: 3, player: sortedLeaderboard[2], order: 'order-3 sm:order-3' },
+  ].filter((entry): entry is { rank: number; player: any; order: string } => Boolean(entry.player));
 
-  const others = sortedLeaderboard.slice(3);
+  // Everyone past the podium, capped: a 500-player session rendered the whole
+  // board, so the end of a quiz was a page of names nobody reads.
+  // Between questions the board is glanced at for a few seconds on a shared
+  // screen, so it shows fewer and has to fit without scrolling. The final
+  // board is read at leisure, so it shows more.
+  const ROUND_LIMIT = 10;
+  const FINAL_LIMIT = 30;
+  const others = sortedLeaderboard.slice(3, FINAL_LIMIT);
+  const hiddenCount = Math.max(0, sortedLeaderboard.length - FINAL_LIMIT);
+  const roundHiddenCount = Math.max(0, sortedLeaderboard.length - ROUND_LIMIT);
+
+  // Where this participant actually placed, found before the list is cut.
+  // Without it someone who came 120th out of 500 finishes the quiz with no
+  // idea how they did, having answered every question.
+  const myIndex = participantId
+    ? sortedLeaderboard.findIndex((p) => p?.id === participantId)
+    : -1;
+  const myRank = myIndex >= 0 ? myIndex + 1 : null;
+  const me = myIndex >= 0 ? sortedLeaderboard[myIndex] : null;
+  // Only worth pinning a separate row when they are not already on screen.
+  const isPlayerOffBoard = !isOrganizer && me !== null && myRank !== null;
+  // Pin the viewer's own row only when the list they are looking at does not
+  // already contain it; the two screens cut at different places.
+  const showMyRank = isPlayerOffBoard && myRank! > FINAL_LIMIT;
+  const showMyRoundRank = isPlayerOffBoard && myRank! > ROUND_LIMIT;
 
 
   // if participant is missing, kick them out
@@ -79,6 +128,8 @@ function LiveQuiz({ isOrganizer = false }: LiveQuizProps) {
     let isMounted = true;
     let reconnectAttempts = 0;
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    // Lobby-only reconciliation for the host; cleared once the quiz starts.
+    let refreshTimer: ReturnType<typeof setInterval> | null = null;
     // Set when we close a socket ourselves (unmount, or replacing a stale
     // one) so onclose knows not to treat it as a dropped connection.
     let deliberateClose = false;
@@ -136,6 +187,23 @@ function LiveQuiz({ isOrganizer = false }: LiveQuizProps) {
             userId: user?.id
           }
         }));
+
+        // The host's list is a join-time snapshot plus per-arrival events, so
+        // anyone who joined while this socket was still connecting is missing
+        // from it, and a single dropped event is never made up. Reconcile on a
+        // slow interval while the lobby is open; it is a cached read, and it
+        // stops once the quiz starts.
+        if (isOrganizer) {
+          if (refreshTimer) clearInterval(refreshTimer);
+          refreshTimer = setInterval(() => {
+            if (socket?.readyState === WebSocket.OPEN) {
+              socket.send(JSON.stringify({
+                type: 'participants:refresh',
+                payload: { sessionId },
+              }));
+            }
+          }, 5000);
+        }
       };
 
 
@@ -154,15 +222,25 @@ function LiveQuiz({ isOrganizer = false }: LiveQuizProps) {
             setParticipants(participant => [...participant, payload.participant].filter((v, i, a) => a.findIndex(t => t.id === v.id) === i));
             break;
           case 'quiz:start':
+            // Lobby is over; nobody new can appear, so stop reconciling.
+            if (refreshTimer) {
+              clearInterval(refreshTimer);
+              refreshTimer = null;
+            }
             setGameState(GameState.STARTING);
             setTimeout(() => {
               if (isOrganizer) socket?.send(JSON.stringify({ type: 'quiz:next-question', payload: { sessionId, questionIndex: 0 } }));
             }, 3000);
             break;
           case 'quiz:question':
+            currentQuestionIdRef.current = payload.question?.id ?? null;
             setCurrentQuestion(payload.question);
             setSelectedAnswer(null);
             setCorrectAnswers([]);
+            // Clear last question's tally rather than letting it show against
+            // this one until the first answer arrives.
+            setAnswerProgress(null);
+            setRecentAnswerers([]);
             setGameState(GameState.QUESTION);
             setQuestionStartTime(Date.now());
 
@@ -170,6 +248,7 @@ function LiveQuiz({ isOrganizer = false }: LiveQuizProps) {
           // Sent only to a reconnecting client, to put them back on the
           // question already in flight instead of a blank screen.
           case 'quiz:state-snapshot':
+            currentQuestionIdRef.current = payload.question?.id ?? null;
             setCurrentQuestion(payload.question);
             setCorrectAnswers([]);
             setTimeLeft(payload.timeLeft);
@@ -186,6 +265,26 @@ function LiveQuiz({ isOrganizer = false }: LiveQuizProps) {
             break;
           case 'quiz:timer-tick':
             setTimeLeft(payload.timeLeft);
+            break;
+          // Ignore a tally that arrives for a question already replaced: on a
+          // slow connection the previous question's last answers can land
+          // after the next question is on screen.
+          case 'quiz:answer-progress':
+            if (
+              !currentQuestionIdRef.current ||
+              currentQuestionIdRef.current === payload.questionId
+            ) {
+              setAnswerProgress({ answered: payload.answered, total: payload.total });
+
+              if (payload.participantId) {
+                setRecentAnswerers((prev) => {
+                  // A duplicate submission must not pop a second avatar.
+                  if (prev[0] === payload.participantId) return prev;
+                  return [payload.participantId, ...prev.filter((id) => id !== payload.participantId)]
+                    .slice(0, RECENT_AVATARS);
+                });
+              }
+            }
             break;
           case 'quiz:question-results':
             setCorrectAnswers(payload.correctAnswers);
@@ -226,6 +325,7 @@ function LiveQuiz({ isOrganizer = false }: LiveQuizProps) {
       deliberateClose = true;
       clearTimeout(timeoutId);
       if (reconnectTimer) clearTimeout(reconnectTimer);
+      if (refreshTimer) clearInterval(refreshTimer);
       if (socket) {
         // Drop the handler first: closing a socket fires onclose, which would
         // otherwise schedule a reconnect for a screen that is going away.
@@ -460,6 +560,95 @@ function LiveQuiz({ isOrganizer = false }: LiveQuizProps) {
                 </div>
               </div>
 
+              {/* Answers in, live. Lets the room see the question filling up,
+                  and explains an early finish: the counter reaching the total
+                  is why the question closed before the clock. */}
+              {answerProgress && answerProgress.total > 0 && (() => {
+                const { answered, total } = answerProgress;
+                const allIn = answered >= total;
+                // Floor, and hold just short of full until everyone is in:
+                // rounding 199/200 up to 100% would show a full bar while the
+                // room is still waiting on someone.
+                const pct = allIn
+                  ? 100
+                  : Math.min(99, Math.floor((answered / total) * 100));
+
+                return (
+                  <div
+                    className="mx-4 mb-6 sm:mb-8"
+                    role="status"
+                    aria-live="polite"
+                    aria-label={`${answered} of ${total} players answered`}
+                  >
+                    <div className="flex items-baseline justify-between mb-2">
+                      <span className="font-secondary tracking-wider text-sm sm:text-base text-zinc-400">
+                        {allIn ? 'Everyone has answered' : 'Answers in'}
+                      </span>
+                      <span className="font-special tracking-wider text-base sm:text-lg">
+                        <span className={allIn ? 'text-emerald-400' : 'text-pink-400'}>{answered}</span>
+                        <span className="text-zinc-500"> / {total}</span>
+                      </span>
+                    </div>
+
+                    {/* Avatars of whoever answered most recently, riding the
+                        head of the bar. Newest is leftmost and largest, so an
+                        arrival is visible from across a room. */}
+                    <div className="relative h-9 mb-1">
+                      <div
+                        className="absolute bottom-0 flex items-end transition-[left] duration-500 ease-out"
+                        style={{
+                          // Held off both edges: at 0% the cluster would sit
+                          // outside the bar on the left, at 100% it would
+                          // overflow on the right.
+                          left: `clamp(0px, ${pct}%, 100%)`,
+                          transform: `translateX(${pct < 12 ? '0' : pct > 92 ? '-100%' : '-50%'})`,
+                        }}
+                      >
+                        {recentAnswerers.map((id, i) => (
+                          <div
+                            key={id}
+                            className={`animate-avatar-pop rounded-full bg-linear-to-br ${getAvatarColor(id)} p-[1.5px] shadow-lg ring-1 ring-black/30 shrink-0`}
+                            style={{
+                              // Newest in front, older ones tucked behind and
+                              // fading, so the cluster reads as a trail.
+                              width: i === 0 ? 30 : 24,
+                              height: i === 0 ? 30 : 24,
+                              marginLeft: i === 0 ? 0 : -9,
+                              opacity: Math.max(0.25, 1 - i * 0.12),
+                              zIndex: RECENT_AVATARS - i,
+                            }}
+                          >
+                            <img
+                              src={getAvatar(id)}
+                              alt=""
+                              aria-hidden="true"
+                              className="w-full h-full object-cover rounded-full"
+                            />
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="h-1.5 w-full rounded-full bg-zinc-700/40 overflow-hidden">
+                      <div
+                        className={`h-full rounded-full transition-[width] duration-500 ease-out ${
+                          allIn
+                            ? 'bg-linear-to-r from-emerald-500 to-emerald-400'
+                            : 'bg-linear-to-r from-pink-600 to-pink-400'
+                        }`}
+                        style={{ width: `${pct}%` }}
+                      />
+                    </div>
+
+                    {!allIn && (
+                      <p className="text-right text-xs text-zinc-500 font-secondary tracking-wide mt-1">
+                        {total - answered} still answering
+                      </p>
+                    )}
+                  </div>
+                );
+              })()}
+
               <h2 className="text-2xl md:text-3xl lg:text-4xl bg-clip-text text-transparent bg-linear-to-b from-pink-500 to-pink-600/80 font-secondary tracking-wider font-bold text-center mt-6 sm:mt-10 mb-10 sm:mb-16 px-2 leading-snug">
                 {currentQuestion?.text}
               </h2>
@@ -539,36 +728,71 @@ function LiveQuiz({ isOrganizer = false }: LiveQuizProps) {
 
 
 
-          <div className="min-h-screen flex flex-col items-center justify-center p-6 bg-surface relative overflow-hidden">
+          <div className="min-h-screen flex flex-col items-center justify-center px-4 py-6 sm:px-6 bg-surface relative overflow-hidden">
             <BgBoss opacity="opacity-5" />
 
 
 
-            <h1 className="sm:text-5xl text-3xl mb-12 z-10 bg-clip-text text-transparent  bg-linear-to-b from-pink-600 to-pink-800/90 font-special tracking-wider flex items-center gap-3">
-              <MdViewInAr className="w-10 h-10  text-pink-700 font-special" /> Leaderboard
+            <h1 className="sm:text-4xl text-2xl mb-4 sm:mb-6 z-10 bg-clip-text text-transparent  bg-linear-to-b from-pink-600 to-pink-800/90 font-special tracking-wider flex items-center gap-3">
+              <MdViewInAr className="w-8 h-8  text-pink-700 font-special" /> Leaderboard
             </h1>
 
-            <div className="flex items-center py-2 justify-center h-1/2 w-full overflow-y-auto ">
+            {/* Shown on a projector between questions, so the whole top ten
+                has to be visible at once: no scrolling, rows sized to fit the
+                viewport rather than a fixed height that overflows. */}
+            <div className="flex items-start justify-center w-full">
 
 
-              <div className="w-full max-w-2xl  space-y-3 z-10">
+              <div className="w-full max-w-2xl space-y-1 sm:space-y-1.5 z-10">
 
-                {leaderboard.slice(0, 30).map((player, idx) => (
+                {sortedLeaderboard.slice(0, ROUND_LIMIT).map((player, idx) => (
                   <div
                     key={player.id}
 
 
-                    className={`flex items-center h-16 sm:h-17 justify-between px-5 rounded-xl border ${idx === 0 ? 'bg-yellow-500/20 border-yellow-500/50  transform scale-100 sm:scale-105 shadow-xl' : idx === 1 ? 'bg-gray-300/30 border-gray-500/80 transform scale-100 sm:scale-103 shadow-xl' : idx === 2 ? 'bg-amber-600/20 border-amber-500/50 transform scale-100 sm:scale-101 shadow-xl' : 'bg-zinc-600/10 border-white/10'}`}>
-                    <div className="flex items-center gap-6">
-                      <span className={`font-black text-2xl w-8 ${idx === 0 ? 'text-yellow-500' : idx === 1 ? 'text-zinc-300' : idx === 2 ? 'text-amber-700' : 'text-zinc-500'}`}>#{idx + 1}</span>
-                      <div className={`sm:w-12 sm:h-12 w-9 h-9 rounded-xl bg-linear-to-br ${getAvatarColor(player.id)} p-0.5 shadow overflow-hidden`}>
+                    // Ring marks the viewer's own row: without it, finding
+                    // yourself in the list takes longer than the results
+                    // screen stays up.
+                    className={`flex items-center justify-between px-3 sm:px-5 py-1.5 sm:py-2 rounded-xl border ${player.id === participantId ? 'ring-2 ring-pink-400/70 ' : ''}${idx === 0 ? 'bg-yellow-500/20 border-yellow-500/50 shadow-lg' : idx === 1 ? 'bg-gray-300/30 border-gray-500/80 shadow-lg' : idx === 2 ? 'bg-amber-600/20 border-amber-500/50 shadow-lg' : 'bg-zinc-600/10 border-white/10'}`}>
+                    <div className="flex items-center gap-3 sm:gap-5 min-w-0">
+                      <span className={`font-black text-lg sm:text-2xl w-7 sm:w-8 shrink-0 ${idx === 0 ? 'text-yellow-500' : idx === 1 ? 'text-zinc-300' : idx === 2 ? 'text-amber-700' : 'text-zinc-500'}`}>#{idx + 1}</span>
+                      <div className={`w-8 h-8 sm:w-10 sm:h-10 shrink-0 rounded-xl bg-linear-to-br ${getAvatarColor(player.id)} p-0.5 shadow overflow-hidden`}>
                         <img src={getAvatar(player.id)} alt={player.username} className="w-full h-full object-cover " />
                       </div>
-                      <span className="font-extrabold   sm:text-xl text-md text-gray-300 font-secondary tracking-wider">{player.username}</span>
+                      {/* truncate: a long name must not push the score off the row */}
+                      <span className="font-extrabold sm:text-lg text-sm text-gray-300 font-secondary tracking-wider truncate">{player.username}</span>
                     </div>
-                    <span className="  sm:text-4xl text-2xl font-special text-pink-500 tracking-wider ">{player.score}</span>
+                    <span className="sm:text-3xl text-xl font-special text-pink-500 tracking-wider shrink-0 ml-3">{player.score}</span>
                   </div>
                 ))}
+
+                {/* Same pinned row between questions: a participant well down
+                    the board should still be able to follow their own
+                    progress, not just watch the leaders. */}
+                {showMyRoundRank && (
+                  <>
+                    <p className="text-center text-zinc-500 text-xs sm:text-sm font-secondary tracking-wider py-0.5">
+                      + {roundHiddenCount} more {roundHiddenCount === 1 ? 'player' : 'players'}
+                    </p>
+
+                    <div className="flex items-center justify-between px-3 sm:px-5 py-1.5 sm:py-2 rounded-xl border-2 border-pink-500/60 bg-pink-600/15">
+                      <div className="flex items-center gap-3 sm:gap-5 min-w-0">
+                        <span className="font-black text-lg sm:text-2xl w-7 sm:w-8 shrink-0 text-pink-400">#{myRank}</span>
+                        <div className={`w-8 h-8 sm:w-10 sm:h-10 shrink-0 rounded-xl bg-linear-to-br ${getAvatarColor(me!.id)} p-0.5 shadow overflow-hidden`}>
+                          <img src={getAvatar(me!.id)} alt={me!.username} className="w-full h-full object-cover " />
+                        </div>
+                        <span className="font-extrabold sm:text-lg text-sm text-pink-400 font-secondary tracking-wider truncate">You</span>
+                      </div>
+                      <span className="sm:text-3xl text-xl font-special text-pink-400 tracking-wider shrink-0 ml-3">{me!.score}</span>
+                    </div>
+                  </>
+                )}
+
+                {!showMyRoundRank && roundHiddenCount > 0 && (
+                  <p className="text-center text-zinc-500 text-xs sm:text-sm font-secondary tracking-wider py-0.5">
+                    + {roundHiddenCount} more {roundHiddenCount === 1 ? 'player' : 'players'}
+                  </p>
+                )}
 
               </div>
 
@@ -610,25 +834,34 @@ function LiveQuiz({ isOrganizer = false }: LiveQuizProps) {
 
             <div className="w-full max-w-4xl mx-auto space-y-6">
 
-              {/* top three performers */}
-              <div className="sm:flex justify-center items-center gap-3 sm:gap-12">
-                {podium.map(({ rank, player }) => {
+              {/* Top three, as a podium: winner centred and raised, runners-up
+                  either side. `items-end` is what makes the bases line up so
+                  the height difference reads as a podium rather than as
+                  misalignment. */}
+              <div className="flex flex-col sm:flex-row justify-center items-center sm:items-end gap-4 sm:gap-6 mb-8">
+                {podium.map(({ rank, player, order }) => {
                   const isFirst = rank === 1;
+                  const isMe = player.id === participantId;
+
+                  const medal =
+                    rank === 1 ? 'bg-yellow-500/20 border-yellow-500/40 text-yellow-400'
+                      : rank === 2 ? 'bg-[#C0C0C0]/25 border-gray-400/60 text-[#D8D8D8]'
+                        : 'bg-[#4A3004]/50 border-amber-500/50 text-amber-500';
 
                   return (
                     <div
                       key={player.id}
-                      className={`flex flex-col gap-2 mb-8 items-center p-5 rounded-2xl w-40
-        ${isFirst
-                          ? 'bg-yellow-500/20 w-60 border border-yellow-500/30 text-yellow-500 scale-110'
-                          : 'bg-surface border border-white/5'}
-        ${rank === 2 ? 'mt-6 w-55 bg-[#C0C0C0]/40 text-[#C0C0C0] border-2 border-gray-400' : ''}
-        ${rank === 3 ? 'mt-10 w-55 bg-[#4A3004]/50 text-amber-600 border-2 border-amber-400' : ''}
-        `}
+                      className={`${order} flex flex-col gap-2 items-center rounded-2xl border-2 ${medal}
+                        w-full max-w-[18rem] sm:w-44 ${isFirst ? 'sm:w-52 sm:pb-10' : ''}
+                        px-4 py-5 ${isMe ? 'ring-2 ring-pink-400/70' : ''}`}
                     >
-                      <span className="text-3xl font-black font-secondary"> Rank: <span className="font-special font-light"> {rank} </span> </span>
+                      {isFirst && <span className="text-3xl leading-none">👑</span>}
 
-                      <div className={`w-16 h-16 rounded-xl bg-linear-to-br ${getAvatarColor(player.id)} p-0.5 shadow overflow-hidden`}>
+                      <span className="text-2xl sm:text-3xl font-black font-secondary">
+                        Rank: <span className="font-special font-light">{rank}</span>
+                      </span>
+
+                      <div className={`${isFirst ? 'w-20 h-20' : 'w-16 h-16'} rounded-xl bg-linear-to-br ${getAvatarColor(player.id)} p-0.5 shadow overflow-hidden`}>
                         <img
                           src={getAvatar(player.id)}
                           alt={player.username}
@@ -636,11 +869,11 @@ function LiveQuiz({ isOrganizer = false }: LiveQuizProps) {
                         />
                       </div>
 
-                      <span className="text-xl font-bold mt-2 text-center font-secondary tracking-wide">
+                      <span className="text-lg sm:text-xl font-bold mt-1 text-center font-secondary tracking-wide break-all">
                         {player.username}
                       </span>
 
-                      <span className="text-2xl font-special tracking-wide">
+                      <span className="text-xl sm:text-2xl font-special tracking-wide">
                         {player.score} pts
                       </span>
                     </div>
@@ -652,7 +885,7 @@ function LiveQuiz({ isOrganizer = false }: LiveQuizProps) {
                 {others.map((player, idx) => (
                   <div
                     key={player.id}
-                    className="flex justify-between items-center px-4 sm:py-5 py-3 rounded-2xl bg-surface border border-white/10 bg-zinc-600/30"
+                    className={`flex justify-between items-center px-4 sm:py-5 py-3 rounded-2xl bg-surface border bg-zinc-600/30 ${player.id === participantId ? 'border-pink-400/70 ring-2 ring-pink-400/50' : 'border-white/10'}`}
                   >
                     <div className="flex items-center gap-3 sm:gap-4">
                       <span className="text-lg sm:text-2xl font-black text-gray-400 tracking-tighter">
@@ -677,6 +910,50 @@ function LiveQuiz({ isOrganizer = false }: LiveQuizProps) {
                     </span>
                   </div>
                 ))}
+
+                {/* Placed outside the visible list: show them their own
+                    standing rather than ending the quiz on other people's
+                    names. */}
+                {showMyRank && (
+                  <>
+                    {hiddenCount > 0 && (
+                      <p className="text-center text-zinc-500 text-sm sm:text-base font-secondary tracking-wider py-2">
+                        + {hiddenCount} more {hiddenCount === 1 ? 'player' : 'players'}
+                      </p>
+                    )}
+
+                    <div className="flex justify-between items-center px-4 sm:py-5 py-3 rounded-2xl border-2 border-pink-500/60 bg-pink-600/15">
+                      <div className="flex items-center gap-3 sm:gap-4">
+                        <span className="text-lg sm:text-2xl font-black text-pink-400 tracking-tighter">
+                          #{myRank}
+                        </span>
+
+                        <div className={`sm:w-12 sm:h-12 h-10 w-10 rounded-xl bg-linear-to-br ${getAvatarColor(me!.id)} p-0.5 shadow overflow-hidden`}>
+                          <img
+                            src={getAvatar(me!.id)}
+                            alt={me!.username}
+                            className="w-full h-full object-cover"
+                          />
+                        </div>
+
+                        <span className="text-md sm:text-xl font-secondary font-extrabold tracking-wider text-pink-400">
+                          You
+                        </span>
+                      </div>
+
+                      <span className="text-md sm:text-2xl font-special tracking-wider text-pink-400">
+                        {me!.score} pts
+                      </span>
+                    </div>
+                  </>
+                )}
+
+                {/* Nothing pinned below, so say the list was cut. */}
+                {!showMyRank && hiddenCount > 0 && (
+                  <p className="text-center text-zinc-500 text-sm sm:text-base font-secondary tracking-wider py-2">
+                    + {hiddenCount} more {hiddenCount === 1 ? 'player' : 'players'}
+                  </p>
+                )}
               </div>
 
             </div>

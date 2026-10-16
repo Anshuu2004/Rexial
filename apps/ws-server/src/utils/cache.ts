@@ -140,16 +140,35 @@ export const appendCachedParticipant = async (sessionId: string, participant: an
 }
 
 
-// get cached leaderboard for a session
+/**
+ * Leaderboard for a session, ranked by score and then by speed.
+ *
+ * Points are whole numbers from 10 down to 1 per question, so with a few
+ * hundred participants a score is shared by a large group and ordering
+ * inside that group would otherwise be whatever the database happened to
+ * return. Summing the answer times each player already has breaks the tie
+ * the way a quiz is expected to: same score, faster player ranks higher.
+ *
+ * Raw SQL because the sort key is an aggregate over a relation, which
+ * Prisma's `orderBy` cannot express; done in Prisma it would be one query
+ * per participant. COALESCE covers a participant who has not answered
+ * anything yet — no rows to sum, but they still belong on the board.
+ */
 export async function getCachedLeaderboard(sessionId: string) {
     return readThrough(
         Keys.leaderboard(sessionId),
         TTL.LEADERBOARD,
-        () => prisma.participant.findMany({
-            where: { sessionId },
-            orderBy: { score: 'desc' },
-            select: { id: true, username: true, score: true },
-        }),
+        () => prisma.$queryRaw`
+            SELECT p.id,
+                   p.username,
+                   p.score,
+                   COALESCE(SUM(pa."timeMs"), 0)::int AS "totalTimeMs"
+            FROM "Participant" p
+            LEFT JOIN "ParticipantAnswer" pa ON pa."participantId" = p.id
+            WHERE p."sessionId" = ${sessionId}
+            GROUP BY p.id, p.username, p.score
+            ORDER BY p.score DESC, "totalTimeMs" ASC, p.username ASC
+        `,
     );
 }
 

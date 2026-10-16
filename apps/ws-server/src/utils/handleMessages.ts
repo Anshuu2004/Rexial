@@ -3,7 +3,7 @@ import WebSocket from "ws";
 import type { Client } from "../index.js";
 import { cache } from "../redis.js";
 import { broadcastToSession } from "./broadcastTosession.js";
-import { clients, sessionTimers, indexClient, unindexClient } from "../clients/index.js";
+import { clients, sessionTimers, indexClient, unindexClient, clientsInSession } from "../clients/index.js";
 import { endQuizSession } from "./endQuizSession.js";
 import { getLeaderboard } from "./leaderboard.js";
 import {
@@ -16,7 +16,18 @@ import {
     invalidateLeaderboard,
     clearSessionCache,
 } from './cache.js';
-import { startQuestionTimer, timerDeadlineKey } from "./timeManager.js";
+import { startQuestionTimer, timerDeadlineKey, finishQuestionEarly } from "./timeManager.js";
+
+
+/**
+ * Points for the fastest correct answer to a question.
+ *
+ * A correct answer scores from MAX_POINTS down to 1 as the clock runs out;
+ * a wrong answer scores 0. Keeping the per-question maximum small means a
+ * leaderboard total reads as roughly "questions answered well" rather than
+ * an arbitrary four-digit number.
+ */
+const MAX_POINTS = 10;
 
 
 
@@ -134,8 +145,13 @@ export const handleMessage = async (client: Client, data: any) => {
                     }
                 }));
 
-
-                console.log("JOIN CODE FROM WS:", payload);
+                // The list above is a snapshot taken at this instant; from
+                // here the organizer only hears about new arrivals through
+                // 'participant:joined'. Anyone who joined while this socket
+                // was still connecting sent their broadcast to nobody, and a
+                // single dropped frame is never made up. Both leave the host
+                // with a count that stays wrong for the rest of the lobby, so
+                // the client can ask for a fresh list with 'participants:refresh'.
             } else if (role === 'PARTICIPANT' && participantId) {
                 const participant = await prisma.participant.findUnique({
                     where: { id: participantId }
@@ -176,6 +192,39 @@ export const handleMessage = async (client: Client, data: any) => {
             break;
         }
 
+
+        /**
+         * Re-send the participant list to one client.
+         *
+         * The lobby is otherwise built from a single snapshot at join plus
+         * incremental 'participant:joined' events, so a host whose socket
+         * connected during a join rush — or who missed one broadcast — shows
+         * a count that never corrects itself. This lets the client reconcile
+         * without reloading the page.
+         *
+         * Read from the cache, so a host polling this does not turn into a
+         * query per poll.
+         */
+        case 'participants:refresh': {
+            const sessionId = client.sessionId || payload?.sessionId;
+            if (!sessionId) break;
+
+            const [session, participants] = await Promise.all([
+                getCachedSession(sessionId),
+                getCachedParticipants(sessionId),
+            ]);
+
+            if (client.ws.readyState !== WebSocket.OPEN) break;
+
+            client.ws.send(JSON.stringify({
+                type: 'participants:sync',
+                payload: {
+                    participants,
+                    joinCode: session?.quiz?.joinCode,
+                },
+            }));
+            break;
+        }
 
 
         case 'quiz:start': {
@@ -241,7 +290,24 @@ export const handleMessage = async (client: Client, data: any) => {
             const answerMeta = question?.answers.find((a: any) => a.id === answerId);
 
             const isCorrect = !!answerMeta?.isCorrect;
-            const points = isCorrect ? Math.max(10, 1_000 - timeMs) : 0;
+
+            // Score across the question's real time limit rather than a fixed
+            // 1000ms. `1000 - timeMs` spent its whole range in the first
+            // second, so on a 15s question everyone slower than 1s scored the
+            // same floor: answering in 2s and in 14s were worth the same, and
+            // only a bot could reach the top of the curve.
+            //
+            // Now a correct answer is worth MAX_POINTS down to 1, scaled over
+            // the time actually allowed; a wrong answer is worth 0. Answering
+            // at all still scores, so the floor is 1 rather than 0.
+            const limitMs = Math.max(1, (question?.timeLimit ?? 15) * 1_000);
+            // timeMs comes from the client and is not trusted for anything
+            // beyond ordering: clamp it so a negative or oversized value
+            // cannot mint points or push the score below the floor.
+            const elapsedMs = Math.min(Math.max(Number(timeMs) || 0, 0), limitMs);
+            const points = isCorrect
+                ? Math.max(1, Math.ceil(MAX_POINTS * (1 - elapsedMs / limitMs)))
+                : 0;
 
             // Insert the answer first and only credit the score if it was
             // actually recorded. Running both concurrently would award points
@@ -265,6 +331,49 @@ export const handleMessage = async (client: Client, data: any) => {
             }
 
             await invalidateLeaderboard(sessionId);
+
+            // Everyone present has answered: close the question instead of
+            // making the room watch an empty countdown. Counting live sockets
+            // rather than Participant rows means someone who closed their
+            // laptop cannot hold the question open to the full limit.
+            const connected = [...clientsInSession(sessionId)].filter(
+                (c) => c.role === 'PARTICIPANT'
+                    && c.participantId
+                    && c.ws.readyState === WebSocket.OPEN,
+            );
+
+            if (connected.length > 0) {
+                const answered = await prisma.participantAnswer.count({
+                    where: {
+                        questionId,
+                        participantId: { in: connected.map((c) => c.participantId as string) },
+                    },
+                });
+
+                // Progress for the room, from the counts already gathered
+                // above: no extra query. It also explains the early finish —
+                // without it a question ending before the clock looks like a
+                // glitch rather than "everyone has answered".
+                // participantId rides along so the room can show whose answer
+                // just landed. Avatars are derived from the id on the client,
+                // so this costs one field rather than a lookup.
+                broadcastToSession(sessionId, 'quiz:answer-progress', {
+                    questionId,
+                    answered,
+                    total: connected.length,
+                    participantId,
+                });
+
+                if (answered >= connected.length) {
+                    // Index of the question just answered, taken from the
+                    // question list rather than the cached session: the
+                    // session cache is not invalidated when the organizer
+                    // advances, so its currentQuestionIndex can be an hour
+                    // stale and would close the wrong question.
+                    const idx = questions.findIndex((q: any) => q.id === questionId);
+                    if (idx >= 0) await finishQuestionEarly(sessionId, idx);
+                }
+            }
 
             break;
         }
