@@ -277,6 +277,27 @@ export const handleMessage = async (client: Client, data: any) => {
 
             broadcastToSession(sessionId, 'quiz:question', { question: sanitizedQuestion })
 
+            // Open the progress bar at zero rather than letting it appear
+            // when the first answer lands. On the host's screen, shown to the
+            // room, a counter that pops into existence partway through reads
+            // as a glitch; starting at 0 / n also tells the room how many are
+            // playing.
+            {
+                const playing = [...clientsInSession(sessionId)].filter(
+                    (c) => c.role === 'PARTICIPANT'
+                        && c.participantId
+                        && c.ws.readyState === WebSocket.OPEN,
+                ).length;
+
+                if (playing > 0) {
+                    broadcastToSession(sessionId, 'quiz:answer-progress', {
+                        questionId: question.id,
+                        answered: 0,
+                        total: playing,
+                    });
+                }
+            }
+
             await startQuestionTimer(sessionId, questionIndex)
             break;
         }

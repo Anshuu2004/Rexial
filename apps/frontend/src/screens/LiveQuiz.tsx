@@ -274,7 +274,14 @@ function LiveQuiz({ isOrganizer = false }: LiveQuizProps) {
               !currentQuestionIdRef.current ||
               currentQuestionIdRef.current === payload.questionId
             ) {
-              setAnswerProgress({ answered: payload.answered, total: payload.total });
+              // Never let the count go backwards. The zero-state sent when a
+              // question opens can arrive after an early answer on a slow
+              // connection, and would otherwise blank a tally already shown.
+              setAnswerProgress((prev) =>
+                prev && payload.answered < prev.answered
+                  ? { answered: prev.answered, total: payload.total }
+                  : { answered: payload.answered, total: payload.total }
+              );
 
               if (payload.participantId) {
                 setRecentAnswerers((prev) => {
