@@ -21,6 +21,27 @@ update after every question, and a final leaderboard closes the session.
 
 Hosts can also upload a PDF and let the AI service write the questions for them.
 
+## A look at it
+
+<div align="center">
+
+**The host opens a lobby and shares the code**
+
+<img src="assets/screenshots/host-lobby.png" alt="Rexial host lobby: a quiz access code above a grid of joined players, with a live count of 751" width="760" />
+
+**Participants answer on their own device, and the room watches the answers land**
+
+<img src="assets/screenshots/live-question-mobile.png" alt="Rexial on a phone: the question, four answer options, a countdown, and a progress bar showing 61 of 751 answered" width="300" />
+
+**Scores settle into a leaderboard at the end**
+
+<img src="assets/screenshots/final-leaderboard.png" alt="Rexial final leaderboard: a podium of the top three, then the ranked list below" width="760" />
+
+</div>
+
+> The screenshots are from a load test, which is why the players are named
+> Bot1, Bot2 and so on — 751 of them in one session.
+
 ## Why it might interest you
 
 Rexial is a genuinely distributed real-time system, not a CRUD app with a quiz theme.
