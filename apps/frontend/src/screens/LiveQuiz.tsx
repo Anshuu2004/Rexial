@@ -264,7 +264,10 @@ function LiveQuiz({ isOrganizer = false }: LiveQuizProps) {
             setGameState(payload.expired ? GameState.RESULTS : GameState.QUESTION);
             break;
           case 'quiz:timer-tick':
-            setTimeLeft(payload.timeLeft);
+            // Floor at zero. A server that cannot close the question leaves
+            // the countdown running, and a participant should see 0 rather
+            // than watch it tick into negative numbers.
+            setTimeLeft(Math.max(0, payload.timeLeft ?? 0));
             break;
           // Ignore a tally that arrives for a question already replaced: on a
           // slow connection the previous question's last answers can land

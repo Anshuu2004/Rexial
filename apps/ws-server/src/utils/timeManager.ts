@@ -23,6 +23,12 @@ export const timerDeadlineKey = (sessionId: string) =>
 const currentQuestionKey = (sessionId: string) =>
     `quiz:current-q:${sessionId}`;
 
+// Set once when a question closes, by whichever path gets there first, so the
+// results cannot be revealed twice. Outlives the deadline key deliberately:
+// the deadline can expire on a loaded server, this must not.
+const closedKey = (sessionId: string, questionIndex: number) =>
+    `quiz:closed:${sessionId}:${questionIndex}`;
+
 /**
  * Close the question in flight: stop the countdown, reveal the answers, then
  * send the standings.
@@ -33,13 +39,38 @@ const currentQuestionKey = (sessionId: string) =>
  * removes the deadline and the other sees 0 and stops. Without that, a last
  * answer landing on the final tick would reveal the results twice.
  */
-async function finishQuestion(sessionId: string, questionIndex: number) {
+async function finishQuestion(
+    sessionId: string,
+    questionIndex: number,
+    /**
+     * The countdown reaching zero. It owns the close outright: the deadline
+     * key carries a TTL, so under load it can expire before the final tick
+     * runs, and treating that as "someone else finished it" left the timer
+     * ticking into negative numbers with results that never came.
+     */
+    byCountdown = false,
+) {
     const lockKey = timerLockKey(sessionId, questionIndex);
 
-    // Claim the close. Only the caller that actually removed the deadline
-    // proceeds; anyone else lost the race and must do nothing.
+    // Claim the close, so the countdown and an early finish racing on the
+    // last tick cannot both reveal the results. `del` reports how many keys
+    // it removed, so exactly one caller sees a non-zero count.
+    //
+    // The countdown is exempt: if the key has already expired there is
+    // nobody else to have claimed it, and bailing here would strand the
+    // question open forever.
     const claimed = await cache.del(timerDeadlineKey(sessionId));
-    if (claimed === 0) return;
+    if (claimed === 0 && !byCountdown) return;
+
+    // The countdown's exemption above means it proceeds even when the key was
+    // already gone, so on its own it would re-reveal a question an early
+    // finish had just closed. This marker is what actually makes the close
+    // happen once: whoever sets it first owns the question, and it outlives
+    // the deadline key.
+    const closedMarker = await cache.set(
+        closedKey(sessionId, questionIndex), '1', 'EX', 300, 'NX',
+    );
+    if (closedMarker !== 'OK') return;
 
     const localTimer = sessionTimers.get(sessionId);
     if (localTimer) {
@@ -140,17 +171,20 @@ export async function startQuestionTimer(
     let timeLeft = question.timeLimit;
 
     // Published so a mid-question rejoin can compute the real remaining time.
+    // TTL generously longer than the countdown itself. At 10s of margin a
+    // loaded server could expire this key before the final tick ran, and the
+    // close then had nothing left to claim.
     await cache.set(
         timerDeadlineKey(sessionId),
         String(Date.now() + question.timeLimit * 1_000),
-        'EX', question.timeLimit + 10,
+        'EX', question.timeLimit + 60,
     );
 
     // Lets an early finish confirm it is closing the question still in flight.
     await cache.set(
         currentQuestionKey(sessionId),
         String(questionIndex),
-        'EX', question.timeLimit + 10,
+        'EX', question.timeLimit + 60,
     );
 
     broadcastToSession(sessionId, 'quiz:timer-tick', { timeLeft });
@@ -160,9 +194,14 @@ export async function startQuestionTimer(
         broadcastToSession(sessionId, 'quiz:timer-tick', { timeLeft });
 
         if (timeLeft <= 0) {
-            // Same close as an early finish, so the two cannot diverge; the
-            // deadline delete inside settles which of them gets there first.
-            await finishQuestion(sessionId, questionIndex);
+            // Stop ticking before the await: at 750 clients a broadcast takes
+            // long enough that another tick can fire while this one is still
+            // closing the question, which is how the countdown ran past zero.
+            clearInterval(timer);
+            sessionTimers.delete(sessionId);
+
+            // Same close as an early finish, so the two cannot diverge.
+            await finishQuestion(sessionId, questionIndex, true);
         }
     }, 1_000);
 
