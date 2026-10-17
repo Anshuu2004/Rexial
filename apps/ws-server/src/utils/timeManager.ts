@@ -189,8 +189,14 @@ export async function startQuestionTimer(
 
     broadcastToSession(sessionId, 'quiz:timer-tick', { timeLeft });
 
+    // Absolute end time, so a tick that runs late reports the time that has
+    // actually passed. Decrementing a counter instead meant a delayed tick
+    // silently lost that second: under load the countdown jumped 22 -> 16 and
+    // then finished early by however much it had skipped.
+    const endsAt = Date.now() + question.timeLimit * 1_000;
+
     const timer = setInterval(async () => {
-        timeLeft--;
+        timeLeft = Math.max(0, Math.ceil((endsAt - Date.now()) / 1_000));
         broadcastToSession(sessionId, 'quiz:timer-tick', { timeLeft });
 
         if (timeLeft <= 0) {

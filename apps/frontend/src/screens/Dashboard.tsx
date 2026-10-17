@@ -230,6 +230,8 @@ function Dashboard() {
                   <tr className="bg-surface border-b border-white/10 text-sm font-medium text-zinc-400">
                     <th className="p-4">Quiz Title</th>
                     <th className="p-4">Date</th>
+                    <th className="p-4">Rank</th>
+                    <th className="p-4">Players</th>
                     <th className="p-4">My Score</th>
                   </tr>
                 </thead>
@@ -240,6 +242,19 @@ function Dashboard() {
                       <tr key={session.id} className="border-b border-white/5 hover:bg-white/5">
                         <td className="p-4 font-medium">{session.quiz.title}</td>
                         <td className="p-4 text-zinc-400 text-sm">{new Date(session.startedAt || session.createdAt).toLocaleDateString()}</td>
+                        <td className="p-4 font-bold">
+                          {session.myRank ? (
+                            <span className={
+                              session.myRank === 1 ? 'text-yellow-500'
+                                : session.myRank === 2 ? 'text-zinc-400'
+                                  : session.myRank === 3 ? 'text-amber-600'
+                                    : 'text-zinc-500'
+                            }>
+                              #{session.myRank}
+                            </span>
+                          ) : <span className="text-zinc-600">—</span>}
+                        </td>
+                        <td className="p-4 text-zinc-400 text-sm">{session.totalParticipants ?? '—'}</td>
                         <td className="p-4 text-primary font-bold">{myData?.score || 0} pts</td>
                       </tr>
                     );

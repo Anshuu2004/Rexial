@@ -27,13 +27,13 @@ function HeroSection() {
 
 
     return (
-        <div className="w-full min-h-screen bg-linear-to-t from-pink-600/20 to-transparent ">
+        <div className="w-full min-h-screen flex flex-col justify-center bg-linear-to-t from-pink-600/20 to-transparent ">
 
         
-        <div className="text-white flex flex-col items-center mt-16 max-w-7xl mx-auto px-4 sm:px-6 pb-16 sm:pb-28 pt-6">
+        <div className="text-white flex flex-col items-center w-full max-w-7xl mx-auto px-4 sm:px-6 pb-12 sm:pb-20 pt-16 sm:pt-24">
 
             {/* Badge */}
-            <div className="badge mt-10 sm:mt-16">
+            <div className="badge mt-4 sm:mt-10">
                 <Badge />
             </div>
 
