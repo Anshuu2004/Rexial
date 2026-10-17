@@ -17,6 +17,7 @@ import {
     clearSessionCache,
 } from './cache.js';
 import { startQuestionTimer, timerDeadlineKey, finishQuestionEarly } from "./timeManager.js";
+import { enqueueAnswer, countAnswered, drainSession } from "./answerQueue.js";
 
 
 /**
@@ -248,6 +249,10 @@ export const handleMessage = async (client: Client, data: any) => {
 
             if (!sessionId || !questions[questionIndex]) {
                 // now no more question- end quiz and clean up
+                // Buffered answers first: the quiz is over, so anything left
+                // in the queue has no later flush to land in and the final
+                // scores would be missing them permanently.
+                await drainSession(sessionId);
                 await endQuizSession(sessionId);
                 await clearSessionCache(sessionId);
                 broadcastToSession(sessionId, 'quiz:ended');
@@ -271,6 +276,27 @@ export const handleMessage = async (client: Client, data: any) => {
             }
 
             broadcastToSession(sessionId, 'quiz:question', { question: sanitizedQuestion })
+
+            // Open the progress bar at zero rather than letting it appear
+            // when the first answer lands. On the host's screen, shown to the
+            // room, a counter that pops into existence partway through reads
+            // as a glitch; starting at 0 / n also tells the room how many are
+            // playing.
+            {
+                const playing = [...clientsInSession(sessionId)].filter(
+                    (c) => c.role === 'PARTICIPANT'
+                        && c.participantId
+                        && c.ws.readyState === WebSocket.OPEN,
+                ).length;
+
+                if (playing > 0) {
+                    broadcastToSession(sessionId, 'quiz:answer-progress', {
+                        questionId: question.id,
+                        answered: 0,
+                        total: playing,
+                    });
+                }
+            }
 
             await startQuestionTimer(sessionId, questionIndex)
             break;
@@ -309,28 +335,22 @@ export const handleMessage = async (client: Client, data: any) => {
                 ? Math.max(1, Math.ceil(MAX_POINTS * (1 - elapsedMs / limitMs)))
                 : 0;
 
-            // Insert the answer first and only credit the score if it was
-            // actually recorded. Running both concurrently would award points
-            // even when the unique constraint rejected the answer, which is
-            // exactly the double-scoring this is meant to prevent.
-            try {
-                await prisma.$transaction([
-                    prisma.participantAnswer.create({
-                        data: { participantId, questionId, answerId, timeMs, isCorrect, points },
-                    }),
-                    prisma.participant.update({
-                        where: { id: participantId },
-                        data: { score: { increment: points } },
-                    }),
-                ]);
-            } catch (err: any) {
-                // P2002 = unique constraint: a duplicate submission that raced
-                // past the check above. Nothing was written; not an error.
-                if (err?.code === 'P2002') break;
-                throw err;
-            }
+            // Buffered rather than written immediately. One transaction per
+            // answer meant 750 people answering at once queued 750 of them
+            // against a pool of 25, and Prisma began rejecting with "Unable
+            // to start a transaction in the given time" — a third of answers
+            // were lost, silently, with the participant none the wiser. The
+            // queue turns that burst into a handful of bulk writes.
+            //
+            // A false return is a duplicate submission already buffered,
+            // which is what the unique constraint would have rejected anyway.
+            if (!enqueueAnswer(sessionId, {
+                participantId, questionId, answerId, timeMs, isCorrect, points,
+            })) break;
 
-            await invalidateLeaderboard(sessionId);
+            // The leaderboard cache has a 10s TTL and is invalidated again
+            // before any read that matters, so dropping it on every single
+            // answer is 750 Redis round trips to no end.
 
             // Everyone present has answered: close the question instead of
             // making the room watch an empty countdown. Counting live sockets
@@ -343,12 +363,15 @@ export const handleMessage = async (client: Client, data: any) => {
             );
 
             if (connected.length > 0) {
-                const answered = await prisma.participantAnswer.count({
-                    where: {
-                        questionId,
-                        participantId: { in: connected.map((c) => c.participantId as string) },
-                    },
-                });
+                // Counts buffered answers as well as written ones. A plain
+                // database count would miss whatever is still in the queue,
+                // so a question everyone had answered would look unfinished
+                // and run to the full time limit.
+                const answered = await countAnswered(
+                    sessionId,
+                    questionId,
+                    connected.map((c) => c.participantId as string),
+                );
 
                 // Progress for the room, from the counts already gathered
                 // above: no extra query. It also explains the early finish —
@@ -389,6 +412,12 @@ export const handleMessage = async (client: Client, data: any) => {
                 clearInterval(sessionTimers.get(sessionId));
                 sessionTimers.delete(sessionId);
             }
+
+            // Buffered answers must land before the final standings are
+            // read, or the last question's scores are missing from the board
+            // everyone finishes on.
+            await drainSession(sessionId);
+            await invalidateLeaderboard(sessionId);
 
             // Read the leaderboard before the caches are dropped: both
             // endQuizSession and clearSessionCache clear it, and reading
