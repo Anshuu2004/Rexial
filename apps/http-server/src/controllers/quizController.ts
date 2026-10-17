@@ -70,16 +70,48 @@ export const getAllQuizesController = async (req: Request, res: Response) => {
                     where: {
                         userId: req.userId
                     }
-                }
+                },
+                // Total players in the session, so a past quiz can say
+                // "12th of 300" rather than just a score with no context.
+                _count: { select: { participants: true } }
             },
             orderBy: { createdAt: 'desc' }
 
         });
 
+        // Rank is a position within a session, which SQL will not give us from
+        // the query above. Counting how many beat each player is one query for
+        // the whole dashboard rather than one per quiz.
+        const myParticipantIds = participatedQuizes
+            .map((s) => s.participants[0]?.id)
+            .filter((id): id is string => Boolean(id));
+
+        const ranks = new Map<string, number>();
+        if (myParticipantIds.length > 0) {
+            const rows = await prisma.$queryRaw<{ id: string; rank: number }[]>`
+                SELECT me.id,
+                       (
+                         SELECT count(*) + 1
+                         FROM "Participant" other
+                         WHERE other."sessionId" = me."sessionId"
+                           AND other.score > me.score
+                       )::int AS rank
+                FROM "Participant" me
+                WHERE me.id = ANY(${myParticipantIds})
+            `;
+            for (const row of rows) ranks.set(row.id, row.rank);
+        }
+
+        const participatedWithRank = participatedQuizes.map((session) => ({
+            ...session,
+            totalParticipants: session._count.participants,
+            myRank: ranks.get(session.participants[0]?.id ?? '') ?? null,
+        }));
+
 
         return res.status(200).json({
             organizedQuizes,
-            participated: participatedQuizes
+            participated: participatedWithRank
         })
 
     } catch (error) {
