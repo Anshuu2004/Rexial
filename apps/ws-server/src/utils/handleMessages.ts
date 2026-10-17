@@ -32,6 +32,79 @@ import { enqueueAnswer, countAnswered, drainSession } from "./answerQueue.js";
 const MAX_POINTS = 10;
 
 
+/**
+ * Rate-limited progress updates.
+ *
+ * One broadcast per answer is O(answers x clients): at 750 participants that
+ * is roughly half a million socket writes in the few seconds a question takes
+ * to fill, on the one thread that also has to run the countdown. The timer
+ * skipped seconds and the results arrived late because of it.
+ *
+ * Coalescing to one update per interval keeps the bar smooth — it animates
+ * between values client-side — at a fraction of the cost. The newest payload
+ * always wins, and a trailing send guarantees the final count is not the one
+ * that got dropped.
+ */
+const PROGRESS_INTERVAL_MS = 150;
+
+interface ProgressPayload {
+    questionId: string;
+    answered: number;
+    total: number;
+    participantId?: string;
+}
+
+const progressPending = new Map<string, ProgressPayload>();
+const progressTimers = new Map<string, NodeJS.Timeout>();
+const progressLastSent = new Map<string, number>();
+
+function queueProgressBroadcast(sessionId: string, payload: ProgressPayload) {
+    progressPending.set(sessionId, payload);
+
+    const now = Date.now();
+    const last = progressLastSent.get(sessionId) ?? 0;
+    const elapsed = now - last;
+
+    // Enough time has passed: send immediately, so the first answer and a
+    // slow trickle both show up at once rather than waiting out the interval.
+    if (elapsed >= PROGRESS_INTERVAL_MS) {
+        flushProgress(sessionId);
+        return;
+    }
+
+    // Otherwise let the already-scheduled trailing send carry it.
+    if (progressTimers.has(sessionId)) return;
+
+    progressTimers.set(
+        sessionId,
+        setTimeout(() => {
+            progressTimers.delete(sessionId);
+            flushProgress(sessionId);
+        }, PROGRESS_INTERVAL_MS - elapsed),
+    );
+}
+
+function flushProgress(sessionId: string) {
+    const payload = progressPending.get(sessionId);
+    if (!payload) return;
+
+    progressPending.delete(sessionId);
+    progressLastSent.set(sessionId, Date.now());
+    broadcastToSession(sessionId, 'quiz:answer-progress', payload);
+}
+
+/** Drop a session's progress state once its quiz is over. */
+function clearProgress(sessionId: string) {
+    const timer = progressTimers.get(sessionId);
+    if (timer) {
+        clearTimeout(timer);
+        progressTimers.delete(sessionId);
+    }
+    progressPending.delete(sessionId);
+    progressLastSent.delete(sessionId);
+}
+
+
 
 
 /**
@@ -265,6 +338,7 @@ export const handleMessage = async (client: Client, data: any) => {
                 await drainSession(sessionId);
                 await endQuizSession(sessionId);
                 await clearSessionCache(sessionId);
+                clearProgress(sessionId);
                 broadcastToSession(sessionId, 'quiz:ended');
                 return;
             };
@@ -388,14 +462,19 @@ export const handleMessage = async (client: Client, data: any) => {
                     connected.map((c) => c.participantId as string),
                 );
 
-                // Progress for the room, from the counts already gathered
-                // above: no extra query. It also explains the early finish —
-                // without it a question ending before the clock looks like a
-                // glitch rather than "everyone has answered".
-                // participantId rides along so the room can show whose answer
-                // just landed. Avatars are derived from the id on the client,
-                // so this costs one field rather than a lookup.
-                broadcastToSession(sessionId, 'quiz:answer-progress', {
+                // Progress for the room, coalesced rather than sent per
+                // answer. Broadcasting on every submission meant 737 answers
+                // against 738 sockets — about half a million ws.send() calls
+                // in the four seconds a question takes to fill — which
+                // saturated the event loop: the one-second countdown could
+                // not run on schedule and visibly skipped (22 straight to
+                // 16), and the results that follow queued behind the
+                // backlog, reaching the host seconds late.
+                //
+                // At most one update every 150ms carries the same
+                // information: the bar is animated client-side anyway, and
+                // nobody can read 737 discrete updates.
+                queueProgressBroadcast(sessionId, {
                     questionId,
                     answered,
                     total: connected.length,
@@ -403,6 +482,12 @@ export const handleMessage = async (client: Client, data: any) => {
                 });
 
                 if (answered >= connected.length) {
+                    // Send the final n/n now rather than letting the trailing
+                    // timer carry it: the question is about to close, and a
+                    // bar that never visibly fills is what made the early
+                    // finish look arbitrary.
+                    flushProgress(sessionId);
+
                     // Index of the question just answered, taken from the
                     // question list rather than the cached session: the
                     // session cache is not invalidated when the organizer
@@ -432,6 +517,7 @@ export const handleMessage = async (client: Client, data: any) => {
             // read, or the last question's scores are missing from the board
             // everyone finishes on.
             await drainSession(sessionId);
+            clearProgress(sessionId);
             await invalidateLeaderboard(sessionId);
 
             // Read the leaderboard before the caches are dropped: both
