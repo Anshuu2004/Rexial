@@ -56,8 +56,11 @@ function JoinQuiz() {
                 username: normalizedUsername
             });
 
-            localStorage.setItem("participantId", data.participantId);
-            localStorage.setItem("username", normalizedUsername);
+            // Keyed by session: a bare "participantId" left over from an
+            // earlier quiz would be picked up by the next one on reload and
+            // let someone resume as a participant who does not exist there.
+            localStorage.setItem(`rexial:participant:${data.sessionId}`, data.participantId);
+            localStorage.setItem(`rexial:username:${data.sessionId}`, normalizedUsername);
 
             // Redirect to play arena with session/participant data
             navigate(`/quiz/play/${data.sessionId}`, {

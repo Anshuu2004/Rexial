@@ -173,6 +173,18 @@ export async function getCachedLeaderboard(sessionId: string) {
 }
 
 
+/**
+ * Drop the cached session.
+ *
+ * Needed whenever currentQuestionIndex changes: the cache holds it for an
+ * hour, so without this a reconnecting client is replayed whichever question
+ * was live when the cache was filled rather than the one actually running.
+ */
+export async function invalidateSession(sessionId: string) {
+    await cache.del(Keys.session(sessionId));
+}
+
+
 export async function invalidateLeaderboard(sessionId: string) {
     await cache.del(Keys.leaderboard(sessionId));
 }

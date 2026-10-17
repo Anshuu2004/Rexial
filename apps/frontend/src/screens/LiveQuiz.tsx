@@ -34,8 +34,16 @@ function LiveQuiz({ isOrganizer = false }: LiveQuizProps) {
 
   const { user } = useAuthStore();
 
-  const participantId = location.state?.participantId;
-  const username = location.state?.username;
+  // location.state is gone after a reload, so fall back to what JoinQuiz
+  // stored. Without this a participant who refreshed mid-quiz was treated as
+  // never having joined and bounced back to /join, losing their place and
+  // their score.
+  const participantId = location.state?.participantId
+    ?? (sessionId ? localStorage.getItem(`rexial:participant:${sessionId}`) : null)
+    ?? undefined;
+  const username = location.state?.username
+    ?? (sessionId ? localStorage.getItem(`rexial:username:${sessionId}`) : null)
+    ?? undefined;
 
   const [ws, setWs] = useState<WebSocket | null>(null);
   const [connectionState, setConnectionState] =
@@ -261,6 +269,13 @@ function LiveQuiz({ isOrganizer = false }: LiveQuizProps) {
             // Scoring uses Date.now() - questionStartTime, so anchor it to
             // the real remaining time rather than the moment they rejoined.
             setQuestionStartTime(Date.now() - (payload.question.timeLimit - payload.timeLeft) * 1000);
+            // Trust the server's index over local counting. qIndex is only
+            // advanced by the host pressing Next, so a reload reset it to 0
+            // while the quiz was on question 6: the counter read "Question 1"
+            // and the next press sent the whole room back to question 2.
+            if (typeof payload.questionIndex === 'number') {
+              setQIndex(payload.questionIndex);
+            }
             setGameState(payload.expired ? GameState.RESULTS : GameState.QUESTION);
             break;
           case 'quiz:timer-tick':
