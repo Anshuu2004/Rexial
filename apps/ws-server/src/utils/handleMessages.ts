@@ -14,6 +14,7 @@ import {
     invalidateParticipants,
     appendCachedParticipant,
     invalidateLeaderboard,
+    invalidateSession,
     clearSessionCache,
 } from './cache.js';
 import { startQuestionTimer, timerDeadlineKey, finishQuestionEarly } from "./timeManager.js";
@@ -153,6 +154,15 @@ export const handleMessage = async (client: Client, data: any) => {
                 // single dropped frame is never made up. Both leave the host
                 // with a count that stays wrong for the rest of the lobby, so
                 // the client can ask for a fresh list with 'participants:refresh'.
+
+                // A host who reloads mid-quiz gets a fresh component in the
+                // WAITING state, which put them back on "Start Game" while
+                // the quiz was still running — and starting again from there
+                // would have reset the room to question one. Replay the live
+                // question so they land where the quiz actually is.
+                if (session?.status === 'IN_PROGRESS') {
+                    await sendQuizStateSnapshot(client, sessionId);
+                }
             } else if (role === 'PARTICIPANT' && participantId) {
                 const participant = await prisma.participant.findUnique({
                     where: { id: participantId }
@@ -265,6 +275,11 @@ export const handleMessage = async (client: Client, data: any) => {
                 where: { id: sessionId },
                 data: { currentQuestionIndex: questionIndex }
             });
+
+            // The cached session carries currentQuestionIndex for an hour, so
+            // leaving it would replay a stale question to anyone who
+            // reconnects — the host reloading mid-quiz most of all.
+            await invalidateSession(sessionId);
 
             // without revealing answers
             const sanitizedQuestion = {

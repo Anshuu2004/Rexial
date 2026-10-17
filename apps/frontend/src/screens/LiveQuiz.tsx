@@ -34,8 +34,16 @@ function LiveQuiz({ isOrganizer = false }: LiveQuizProps) {
 
   const { user } = useAuthStore();
 
-  const participantId = location.state?.participantId;
-  const username = location.state?.username;
+  // location.state is gone after a reload, so fall back to what JoinQuiz
+  // stored. Without this a participant who refreshed mid-quiz was treated as
+  // never having joined and bounced back to /join, losing their place and
+  // their score.
+  const participantId = location.state?.participantId
+    ?? (sessionId ? localStorage.getItem(`rexial:participant:${sessionId}`) : null)
+    ?? undefined;
+  const username = location.state?.username
+    ?? (sessionId ? localStorage.getItem(`rexial:username:${sessionId}`) : null)
+    ?? undefined;
 
   const [ws, setWs] = useState<WebSocket | null>(null);
   const [connectionState, setConnectionState] =
@@ -64,6 +72,23 @@ function LiveQuiz({ isOrganizer = false }: LiveQuizProps) {
   // and only the last handful are legible anyway.
   const [recentAnswerers, setRecentAnswerers] = useState<string[]>([]);
   const RECENT_AVATARS = 8;
+
+  // Avatar sizes for the progress bar. Inline rather than Tailwind classes
+  // because the leader is sized differently from the trail, so this tracks
+  // the viewport directly. Mobile keeps the original sizes; a laptop or a
+  // projector has the room for something readable across a hall.
+  const [isWideScreen, setIsWideScreen] = useState(
+    typeof window !== 'undefined' && window.matchMedia('(min-width: 640px)').matches
+  );
+  useEffect(() => {
+    const mq = window.matchMedia('(min-width: 640px)');
+    const onChange = (e: MediaQueryListEvent) => setIsWideScreen(e.matches);
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  }, []);
+  const avatarLead = isWideScreen ? 52 : 30;
+  const avatarTrail = isWideScreen ? 42 : 24;
+  const avatarOverlap = isWideScreen ? -14 : -9;
 
   const [selectedAnswer, setSelectedAnswer] = useState<string | null>(null);
   const [questionStartTime, setQuestionStartTime] = useState<number>(0);
@@ -261,10 +286,20 @@ function LiveQuiz({ isOrganizer = false }: LiveQuizProps) {
             // Scoring uses Date.now() - questionStartTime, so anchor it to
             // the real remaining time rather than the moment they rejoined.
             setQuestionStartTime(Date.now() - (payload.question.timeLimit - payload.timeLeft) * 1000);
+            // Trust the server's index over local counting. qIndex is only
+            // advanced by the host pressing Next, so a reload reset it to 0
+            // while the quiz was on question 6: the counter read "Question 1"
+            // and the next press sent the whole room back to question 2.
+            if (typeof payload.questionIndex === 'number') {
+              setQIndex(payload.questionIndex);
+            }
             setGameState(payload.expired ? GameState.RESULTS : GameState.QUESTION);
             break;
           case 'quiz:timer-tick':
-            setTimeLeft(payload.timeLeft);
+            // Floor at zero. A server that cannot close the question leaves
+            // the countdown running, and a participant should see 0 rather
+            // than watch it tick into negative numbers.
+            setTimeLeft(Math.max(0, payload.timeLeft ?? 0));
             break;
           // Ignore a tally that arrives for a question already replaced: on a
           // slow connection the previous question's last answers can land
@@ -588,10 +623,10 @@ function LiveQuiz({ isOrganizer = false }: LiveQuizProps) {
                     aria-label={`${answered} of ${total} players answered`}
                   >
                     <div className="flex items-baseline justify-between mb-2">
-                      <span className="font-secondary tracking-wider text-sm sm:text-base text-zinc-400">
+                      <span className="font-secondary tracking-wider text-sm sm:text-xl md:text-2xl text-zinc-400">
                         {allIn ? 'Everyone has answered' : 'Answers in'}
                       </span>
-                      <span className="font-special tracking-wider text-base sm:text-lg">
+                      <span className="font-special tracking-wider text-base sm:text-2xl md:text-3xl">
                         <span className={allIn ? 'text-emerald-400' : 'text-pink-400'}>{answered}</span>
                         <span className="text-zinc-500"> / {total}</span>
                       </span>
@@ -600,7 +635,7 @@ function LiveQuiz({ isOrganizer = false }: LiveQuizProps) {
                     {/* Avatars of whoever answered most recently, riding the
                         head of the bar. Newest is leftmost and largest, so an
                         arrival is visible from across a room. */}
-                    <div className="relative h-9 mb-1">
+                    <div className="relative h-9 sm:h-16 mb-1 sm:mb-2">
                       <div
                         className="absolute bottom-0 flex items-end transition-[left] duration-500 ease-out"
                         style={{
@@ -618,9 +653,9 @@ function LiveQuiz({ isOrganizer = false }: LiveQuizProps) {
                             style={{
                               // Newest in front, older ones tucked behind and
                               // fading, so the cluster reads as a trail.
-                              width: i === 0 ? 30 : 24,
-                              height: i === 0 ? 30 : 24,
-                              marginLeft: i === 0 ? 0 : -9,
+                              width: i === 0 ? avatarLead : avatarTrail,
+                              height: i === 0 ? avatarLead : avatarTrail,
+                              marginLeft: i === 0 ? 0 : avatarOverlap,
                               opacity: Math.max(0.25, 1 - i * 0.12),
                               zIndex: RECENT_AVATARS - i,
                             }}
@@ -636,7 +671,7 @@ function LiveQuiz({ isOrganizer = false }: LiveQuizProps) {
                       </div>
                     </div>
 
-                    <div className="h-1.5 w-full rounded-full bg-zinc-700/40 overflow-hidden">
+                    <div className="h-1.5 sm:h-3 md:h-4 w-full rounded-full bg-zinc-700/40 overflow-hidden">
                       <div
                         className={`h-full rounded-full transition-[width] duration-500 ease-out ${
                           allIn
@@ -648,7 +683,7 @@ function LiveQuiz({ isOrganizer = false }: LiveQuizProps) {
                     </div>
 
                     {!allIn && (
-                      <p className="text-right text-xs text-zinc-500 font-secondary tracking-wide mt-1">
+                      <p className="text-right text-xs sm:text-base md:text-lg text-zinc-500 font-secondary tracking-wide mt-1 sm:mt-2">
                         {total - answered} still answering
                       </p>
                     )}
