@@ -12,7 +12,16 @@ import { DIFFICULTY_STYLES } from "../components/ai/difficulty"
 const DIFFICULTIES: Difficulty[] = ['Low', 'Medium', 'High'];
 
 
+interface QuizQuestion {
+  id: string;
+  text: string;
+  timeLimit: number;
+  difficulty?: Difficulty;
+  answers: Array<{ id: string; text: string; isCorrect: boolean }>;
+}
+
 function QuizBuilder() {
+
 
   const { id } = useParams();
 
@@ -33,6 +42,10 @@ function QuizBuilder() {
 
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteMsg, setInviteMsg] = useState('');
+
+  const [questionToDelete, setQuestionToDelete] = useState<QuizQuestion | null>(null);
+  const [deleting, setDeleting] = useState<boolean>(false);
+  const [deleteError, setDeleteError] = useState<string>('');
 
 
 
@@ -141,6 +154,32 @@ function QuizBuilder() {
       fetchQuiz();
     } catch (err) {
       console.error(err);
+    }
+  };
+
+  const handleDeleteQuestion = async () => {
+    if (!questionToDelete || deleting) return;
+    try {
+      setDeleting(true);
+      setDeleteError('');
+      await api.delete(`/quizzes/${id}/questions/${questionToDelete.id}`);
+      setQuiz((prev: { questions?: QuizQuestion[]; [key: string]: unknown } | null) => ({
+        ...prev,
+        questions: prev?.questions ? prev.questions.filter((q) => q.id !== questionToDelete.id) : []
+      }));
+      setQuestionToDelete(null);
+    } catch (err: unknown) {
+      console.error('Failed to delete question', err);
+      let errorMsg = 'Failed to delete question';
+      if (err && typeof err === 'object' && 'response' in err) {
+        const resp = (err as { response?: { data?: { error?: string } } }).response;
+        if (resp?.data?.error) {
+          errorMsg = resp.data.error;
+        }
+      }
+      setDeleteError(errorMsg);
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -289,7 +328,18 @@ function QuizBuilder() {
                       <span className={`text-xs px-2 py-1 rounded border font-medium ${DIFFICULTY_STYLES[q.difficulty as Difficulty] ?? DIFFICULTY_STYLES.Medium}`}>{q.difficulty}</span>
                     )}
                     <span className="bg-green-600/10  border border-white/10 px-4 py-1 font-semibold tracking-wide rounded text-xs text-zinc-400">{q.timeLimit}s</span>
-                    <button className="text-red-400 font-semibold font-main tracking-wider rounded-md border border-rose-700/20 cursor-pointer bg-rose-600/20 hover:bg-rose-600/30 active:scale-95 hover:text-red-400 transition-colors py-1 px-4 flex items-center gap-1"><BsTrash2 className="w-4 h-4" />Delete</button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setDeleteError('');
+                        setQuestionToDelete(q);
+                      }}
+                      disabled={deleting && questionToDelete?.id === q.id}
+                      className="text-red-400 font-semibold font-main tracking-wider rounded-md border border-rose-700/20 cursor-pointer bg-rose-600/20 hover:bg-rose-600/30 active:scale-95 hover:text-red-400 transition-colors py-1 px-4 flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      <BsTrash2 className="w-4 h-4" />
+                      Delete
+                    </button>
                   </div>
                 </div>
                 <div className="grid sm:grid-cols-2 gap-6">
@@ -307,6 +357,56 @@ function QuizBuilder() {
               </div>
             )}
           </div>
+
+          {questionToDelete && (
+            <div
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="delete-dialog-title"
+              className="fixed inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center z-50 p-4"
+            >
+              <div className="bg-zinc-900 border border-white/10 rounded-2xl p-6 sm:p-8 max-w-md w-full shadow-2xl">
+                <h3 id="delete-dialog-title" className="text-xl font-bold font-secondary text-gray-200 mb-2">
+                  Delete Question
+                </h3>
+                <p className="text-zinc-400 text-sm mb-4 font-main">
+                  Are you sure you want to delete this question? This action cannot be undone.
+                </p>
+                <div className="bg-black/40 border border-white/5 rounded-lg p-3 mb-6 text-sm text-gray-300 font-secondary line-clamp-2">
+                  "{questionToDelete.text}"
+                </div>
+                {deleteError && (
+                  <p className="text-sm text-rose-400 mb-4 font-secondary font-medium" role="alert">
+                    {deleteError}
+                  </p>
+                )}
+                <div className="flex justify-end gap-3">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!deleting) {
+                        setQuestionToDelete(null);
+                        setDeleteError('');
+                      }
+                    }}
+                    disabled={deleting}
+                    className="px-4 py-2 text-sm text-zinc-400 hover:text-zinc-200 bg-white/5 hover:bg-white/10 rounded-xl border border-white/10 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleDeleteQuestion}
+                    disabled={deleting}
+                    className="px-4 py-2 text-sm text-red-300 hover:text-red-200 bg-rose-600/20 hover:bg-rose-600/30 border border-rose-600/40 rounded-xl font-semibold transition-colors cursor-pointer active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                  >
+                    <BsTrash2 className="w-4 h-4" />
+                    {deleting ? 'Deleting...' : 'Delete'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Sidebar */}

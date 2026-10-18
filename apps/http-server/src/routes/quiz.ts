@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { authMiddleware } from "../middlewares/authmiddleware";
-import { createQuestionController, createQuizController, generateAccessCodeController, getAllQuizesController, getQuizByIdController, startQuizSessionController } from "../controllers/quizController";
+import { createQuestionController, createQuizController, deleteQuestionController, generateAccessCodeController, getAllQuizesController, getQuizByIdController, startQuizSessionController } from "../controllers/quizController";
 
 const router: Router = Router();
 
@@ -22,6 +22,11 @@ router.post("/:quizId/generate-access-code", authMiddleware, generateAccessCodeC
 
 // adding questions 
 router.post("/:quizId/questions", authMiddleware, createQuestionController)
+
+
+// deleting questions
+router.delete("/:quizId/questions/:questionId", authMiddleware, deleteQuestionController)
+router.delete("/questions/:questionId", authMiddleware, deleteQuestionController)
 
 
 
