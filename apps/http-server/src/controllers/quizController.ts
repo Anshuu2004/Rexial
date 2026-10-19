@@ -329,3 +329,63 @@ export const startQuizSessionController = async (req: Request, res: Response) =>
 
     }
 }
+
+
+
+
+
+
+// deleting question from a quiz
+export const deleteQuestionController = async (req: Request, res: Response) => {
+    try {
+        const { quizId, questionId } = req.params;
+
+        if (!questionId || typeof questionId !== 'string' || !questionId.trim()) {
+            return errorResponse(res, 400, "Question ID is required");
+        }
+
+        const question = await prisma.question.findUnique({
+            where: { id: questionId as string },
+            include: {
+                quiz: {
+                    include: {
+                        quizOrganizers: {
+                            where: {
+                                userId: req.userId,
+                                inviteStatus: 'ACCEPTED'
+                            }
+                        }
+                    }
+                }
+            }
+        });
+
+        if (!question) {
+            return errorResponse(res, 404, "Question not found");
+        }
+
+        if (quizId && question.quizId !== quizId) {
+            return errorResponse(res, 404, "Question not found in this quiz");
+        }
+
+        const isOrganizer = question.quiz.quizOrganizers.length > 0;
+        const isCreator = question.quiz.creatorId === req.userId;
+
+        if (!isOrganizer && !isCreator) {
+            return errorResponse(res, 403, "You don't have access to this quiz");
+        }
+
+        await prisma.question.delete({
+            where: { id: questionId as string }
+        });
+
+        return res.status(200).json({
+            success: true,
+            message: "Question deleted successfully"
+        });
+
+    } catch (error) {
+        console.log("Delete question error: ", error);
+        return errorResponse(res, 500, "Internal Server Error");
+    }
+}

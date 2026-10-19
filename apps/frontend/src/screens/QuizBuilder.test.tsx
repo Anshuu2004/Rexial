@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import QuizBuilder from './QuizBuilder';
 
 vi.mock('../services/api', () => ({
-    api: { get: vi.fn(), post: vi.fn() },
+    api: { get: vi.fn(), post: vi.fn(), delete: vi.fn() },
 }));
 
 vi.mock('../services/genaiApi', async (importOriginal) => ({
@@ -44,7 +44,9 @@ beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(api.get).mockResolvedValue({ data: quiz });
     vi.mocked(api.post).mockResolvedValue({ data: {} });
+    vi.mocked(api.delete).mockResolvedValue({ data: { success: true } });
 });
+
 
 describe('QuizBuilder AI integration', () => {
     it('shows each question difficulty', async () => {
@@ -119,5 +121,108 @@ describe('QuizBuilder AI integration', () => {
                 expect.objectContaining({ text: 'Manual?', difficulty: 'Low' })
             )
         );
+    });
+});
+
+describe('QuizBuilder question deletion', () => {
+    it('shows confirmation dialog when Delete button is clicked and cancels when requested', async () => {
+        const user = renderBuilder();
+        await screen.findByText('What is ATP?');
+
+        const deleteBtn = screen.getByRole('button', { name: /delete/i });
+        await user.click(deleteBtn);
+
+        // Confirmation modal is visible
+        const dialog = screen.getByRole('dialog');
+        expect(dialog).toBeInTheDocument();
+        expect(within(dialog).getByText('Delete Question')).toBeInTheDocument();
+        expect(within(dialog).getByText(/"What is ATP\?"/i)).toBeInTheDocument();
+
+        // Clicking cancel dismisses the dialog without deleting
+        const cancelBtn = within(dialog).getByRole('button', { name: /cancel/i });
+        await user.click(cancelBtn);
+
+        expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+        expect(api.delete).not.toHaveBeenCalled();
+        expect(screen.getByText('What is ATP?')).toBeInTheDocument();
+    });
+
+    it('deletes question when confirmed and removes it from the UI', async () => {
+        const user = renderBuilder();
+        await screen.findByText('What is ATP?');
+
+        await user.click(screen.getByRole('button', { name: /delete/i }));
+
+        const dialog = screen.getByRole('dialog');
+        const confirmDeleteBtn = within(dialog).getByRole('button', { name: /^delete$/i });
+        await user.click(confirmDeleteBtn);
+
+        await waitFor(() =>
+            expect(api.delete).toHaveBeenCalledWith('/quizzes/quiz-1/questions/q1')
+        );
+
+        // Modal closed and question is gone
+        await waitFor(() => {
+            expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+            expect(screen.queryByText('What is ATP?')).not.toBeInTheDocument();
+        });
+
+        // Zero questions state is shown
+        expect(screen.getByText('No questions added yet.')).toBeInTheDocument();
+    });
+
+    it('shows error and keeps question when deletion fails', async () => {
+        vi.mocked(api.delete).mockRejectedValueOnce({
+            response: { data: { error: 'Failed to delete question' } },
+        });
+
+        const user = renderBuilder();
+        await screen.findByText('What is ATP?');
+
+        await user.click(screen.getByRole('button', { name: /delete/i }));
+
+        const dialog = screen.getByRole('dialog');
+        await user.click(within(dialog).getByRole('button', { name: /^delete$/i }));
+
+        // Error message displayed
+        await screen.findByText('Failed to delete question');
+
+        // Question is still in the document
+        expect(screen.getByText('What is ATP?')).toBeInTheDocument();
+    });
+
+    it('deletes the correct question when multiple questions exist', async () => {
+        const multiQuiz = {
+            ...quiz,
+            questions: [
+                { id: 'q1', text: 'First question', timeLimit: 15, difficulty: 'Low', answers },
+                { id: 'q2', text: 'Second question', timeLimit: 20, difficulty: 'High', answers },
+            ],
+        };
+        vi.mocked(api.get).mockResolvedValueOnce({ data: multiQuiz });
+
+        const user = renderBuilder();
+        await screen.findByText('First question');
+        await screen.findByText('Second question');
+
+        // Find the delete button on the second question card
+        const secondCard = screen.getByText('Second question').closest('div.group') as HTMLElement;
+        const deleteSecondBtn = within(secondCard).getByRole('button', { name: /delete/i });
+        await user.click(deleteSecondBtn);
+
+        const dialog = screen.getByRole('dialog');
+        expect(within(dialog).getByText(/"Second question"/i)).toBeInTheDocument();
+
+        await user.click(within(dialog).getByRole('button', { name: /^delete$/i }));
+
+        await waitFor(() =>
+            expect(api.delete).toHaveBeenCalledWith('/quizzes/quiz-1/questions/q2')
+        );
+
+        // Second question removed, first question remains
+        await waitFor(() => {
+            expect(screen.queryByText('Second question')).not.toBeInTheDocument();
+        });
+        expect(screen.getByText('First question')).toBeInTheDocument();
     });
 });
