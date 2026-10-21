@@ -21,6 +21,10 @@ function Dashboard() {
 
   const [titleLoading, setTitleLoading] = useState<boolean>(false);
 
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  const [createError, setCreateError] = useState<string | null>(null);
+
   const { user, logout } = useAuthStore();
   const navigate = useNavigate();
 
@@ -39,8 +43,10 @@ function Dashboard() {
     try {
       const { data } = await api.get('/quizzes');
       setQuizzes(data);
+      setLoadError(null);
     } catch (error) {
       console.log(error)
+      setLoadError('Failed to load your quizzes. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -55,10 +61,12 @@ function Dashboard() {
       const { data } = await api.post('/quizzes', { title: newTitle, description: newDescription });
 
       setNewTitle('');
+      setCreateError(null);
       setShowCreate(false);
       navigate(`/quiz/${data.id}/edit`);
     } catch (error) {
       console.log('Failed to create quiz', error)
+      setCreateError('Failed to create the quiz. Please try again.');
     } finally {
       setTitleLoading(false);
     }
@@ -125,7 +133,7 @@ function Dashboard() {
             <p className="text-zinc-400 font-main font-normal tracking-wider">Manage your hosted quizzes and view your history.</p>
           </div>
           <button
-            onClick={() => setShowCreate(true)}
+            onClick={() => { setCreateError(null); setShowCreate(true); }}
             className=" flex items-center gap-2 py-2.5 px-4 rounded-full bg-pink-600/30 hover:bg-pink-600/40 active:scale-90 border border-pink-700 cursor-pointer text-pink-500 font-secondary tracking-wider font-extrabold transition duration-100"
           >
             <BiPlus /> Create New Quiz
@@ -174,10 +182,15 @@ function Dashboard() {
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
               {[1, 2, 3].map(i => <div key={i} className="h-48 rounded-xl bg-surface animate-pulse" />)}
             </div>
+          ) : loadError ? (
+            <div className="text-center py-16 bg-black/50 border border-white/10 rounded-2xl">
+              <p role="alert" className="text-rose-400 font-main tracking-wide text-md mb-4">{loadError}</p>
+              <button onClick={fetchQuizzes} className="border active:scale-95 border-pink-900 py-2 cursor-pointer px-5 rounded-full text-pink-500 bg-pink-900/30 font-secondary">Retry</button>
+            </div>
           ) : quizzes?.organizedQuizes?.length === 0 ? (
             <div className="text-center py-16 bg-black/50 border border-white/10 rounded-2xl">
               <p className=" bg-clip-text font-main tracking-wide text-md text-transparent bg-linear-to-t from-pink-700 to-pink-400 mb-4">You haven't created any quizzes yet.</p>
-              <button onClick={() => setShowCreate(true)} className="border active:scale-95  border-pink-900 py-2 cursor-pointer px-5 rounded-full text-pink-500 bg-pink-900/30 font-secondary">Create one now</button>
+              <button onClick={() => { setCreateError(null); setShowCreate(true); }} className="border active:scale-95  border-pink-900 py-2 cursor-pointer px-5 rounded-full text-pink-500 bg-pink-900/30 font-secondary">Create one now</button>
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 bg-black/60 gap-6 py-8 px-5 border border-white/10 rounded-2xl">
@@ -219,7 +232,7 @@ function Dashboard() {
 
           {loading ? (
             <div className="h-24 bg-black text-gray-50 rounded-xl bg-surface animate-pulse" />
-          ) : quizzes.participated.length === 0 ? (
+          ) : loadError ? null : quizzes.participated.length === 0 ? (
             <div className="text-center py-28 bg-black/50 border border-white/10 rounded-2xl">
               <p className=" bg-clip-text font-main tracking-wide text-md text-transparent bg-linear-to-t from-pink-700 to-pink-400 mb-4">No played history yet.</p>
             </div>
@@ -291,6 +304,9 @@ function Dashboard() {
                   value={newDescription}
                   onChange={e => setNewDescription(e.target.value)}
                 />
+                {createError && (
+                  <p role="alert" className="mb-4 text-sm text-rose-400 font-secondary font-medium">{createError}</p>
+                )}
                 <div className="flex gap-3 justify-end">
                   <button type="button" onClick={() => setShowCreate(false)} className="border active:scale-95 bg-rose-800/20 hover:bg-rose-800/30 tracking-wider font-secondary w-full cursor-pointer px-10 py-3 rounded-xl font-extrabold text-rose-600 border-rose-500/40">Cancel</button>
                   <button type="submit" disabled={!newTitle.trim()} className="border active:scale-95 font-secondary w-full cursor-pointer border-pink-600/40 px-10 py-3 bg-pink-600/20 hover:bg-pink-600/30 rounded-xl font-extrabold text-pink-600"> {titleLoading ? "Creating..." : "Create"}  </button>
