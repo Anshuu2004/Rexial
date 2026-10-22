@@ -226,3 +226,31 @@ describe('QuizBuilder question deletion', () => {
         expect(screen.getByText('First question')).toBeInTheDocument();
     });
 });
+
+describe('QuizBuilder error states', () => {
+    it('shows an error with a retry instead of an empty list when loading fails', async () => {
+        vi.mocked(api.get).mockRejectedValueOnce(new Error('network down'));
+
+        const user = renderBuilder();
+
+        expect(await screen.findByRole('alert')).toHaveTextContent('Failed to load this quiz');
+        expect(screen.queryByText('No questions added yet.')).not.toBeInTheDocument();
+
+        vi.mocked(api.get).mockResolvedValueOnce({ data: quiz });
+        await user.click(screen.getByRole('button', { name: 'Retry' }));
+
+        expect(await screen.findByText('What is ATP?')).toBeInTheDocument();
+    });
+
+    it('surfaces a failed generate-code request', async () => {
+        vi.mocked(api.post).mockRejectedValueOnce(new Error('500'));
+
+        const user = renderBuilder();
+        await screen.findByText('What is ATP?');
+
+        await user.click(screen.getByRole('button', { name: /generate join code/i }));
+
+        expect(await screen.findByRole('alert')).toHaveTextContent('Failed to generate a join code');
+        expect(api.post).toHaveBeenCalledWith('/quizzes/quiz-1/generate-access-code');
+    });
+});

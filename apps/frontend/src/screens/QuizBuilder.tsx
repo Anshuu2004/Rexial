@@ -47,6 +47,9 @@ function QuizBuilder() {
   const [deleting, setDeleting] = useState<boolean>(false);
   const [deleteError, setDeleteError] = useState<string>('');
 
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [codeError, setCodeError] = useState<string | null>(null);
+
 
 
 
@@ -64,8 +67,10 @@ function QuizBuilder() {
 
 
       setQuiz(data);
+      setLoadError(null);
     } catch (error) {
       console.log(error);
+      setLoadError('Failed to load this quiz. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -73,6 +78,7 @@ function QuizBuilder() {
 
   const handleGenerateCode = async () => {
     try {
+      setCodeError(null);
       setLoading(true);
       const { data } = await api.post(`/quizzes/${id}/generate-access-code`);
       setQuiz({ ...quiz, joinCode: data.joinCode, status: 'ACTIVE' })
@@ -80,6 +86,7 @@ function QuizBuilder() {
 
     } catch (error) {
       console.log(error);
+      setCodeError('Failed to generate a join code. Please try again.');
 
     } finally {
       setLoading(false);
@@ -216,6 +223,9 @@ function QuizBuilder() {
                 {loading ? "Generating..." : "Generate Join Code"}
               </button>
             )}
+            {codeError && (
+              <p role="alert" className="text-xs text-rose-400 font-secondary font-medium max-w-40">{codeError}</p>
+            )}
             {quiz?.status === 'ACTIVE' && (
               <button
                 onClick={handleHostLive}
@@ -318,6 +328,12 @@ function QuizBuilder() {
           )}
 
           <div className="space-y-4">
+            {loadError && !quiz && !loading && (
+              <div className="text-center py-12 border border-dashed border-border rounded-xl text-zinc-500">
+                <p role="alert" className="text-rose-400 font-main tracking-wider mb-4">{loadError}</p>
+                <button onClick={fetchQuiz} className="border active:scale-95 border-pink-900 py-2 cursor-pointer px-5 rounded-full text-pink-500 bg-pink-900/30 font-secondary">Retry</button>
+              </div>
+            )}
             {quiz?.questions?.map((q: any, idx: number) => (
               <div key={q.id} className="bg-surface  border bg-zinc-900/40 border-border rounded-xl py-6 px-10 border-gray-700/30 transition-colors group">
                 <div className="flex justify-between items-start mb-4">
