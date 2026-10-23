@@ -77,6 +77,15 @@ for (const signal of ['SIGTERM', 'SIGINT'] as const) {
 }
 
 
+// Last line of defence. Node 22 exits on an unhandled rejection, which drops
+// every quiz on this instance and skips the shutdown flush above, so log it
+// and keep serving. Call sites should still catch their own errors; this is
+// only for the one that slips through.
+process.on('unhandledRejection', (reason) => {
+    console.error('[process] unhandled rejection', reason);
+});
+
+
 startSessionSubscriber();
 
 wss.on('connection', (ws: WebSocket) => {
@@ -120,7 +129,13 @@ wss.on('connection', (ws: WebSocket) => {
         unindexClient(client);
 
         if (client.sessionId && client.role === 'PARTICIPANT') {
-            await invalidateParticipants(client.sessionId);
+            // ws does not await this handler, so a Redis error here would
+            // otherwise surface as an unhandled rejection.
+            try {
+                await invalidateParticipants(client.sessionId);
+            } catch (err) {
+                console.error('[ws] participant cache invalidation failed', client.sessionId, err);
+            }
         }
 
     })
