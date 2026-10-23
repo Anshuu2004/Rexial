@@ -52,6 +52,15 @@ FRONTEND_URL=http://localhost:5173
 
 ```
 
+*and in `/apps/ws-server` (copy `.env.example`) put the **same** `JWT_SECRET` as
+http-server. The ws-server uses it to check the host's login before it lets a
+socket start, advance or end a quiz. If the two values differ the host is
+refused with `ORGANIZER_AUTH_FAILED`:
+
+```bash
+cp apps/ws-server/.env.example apps/ws-server/.env
+```
+
 *The **GenAI service** (`/apps/genAI`) has its own env. Copy the example:
 
 ```bash

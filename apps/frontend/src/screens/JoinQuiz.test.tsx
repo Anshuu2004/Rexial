@@ -73,7 +73,10 @@ describe('JoinQuiz input normalization', () => {
             })
         );
 
-        expect(localStorage.getItem('username')).toBe('bob');
+        // Scoped to the session: a bare 'username' left from an earlier quiz
+        // would be picked up by the next one on reload.
+        expect(localStorage.getItem('rexial:username:session-1')).toBe('bob');
+        expect(localStorage.getItem('rexial:participant:session-1')).toBe('participant-1');
 
         expect(await screen.findByText('Joined')).toBeInTheDocument();
         expect(screen.getByTestId('play-state')).toHaveTextContent('"username":"bob"');

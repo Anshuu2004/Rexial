@@ -19,6 +19,12 @@ import {
 } from './cache.js';
 import { startQuestionTimer, timerDeadlineKey, finishQuestionEarly } from "./timeManager.js";
 import { enqueueAnswer, countAnswered, drainSession } from "./answerQueue.js";
+import {
+    authorizeOrganizerAction,
+    getUserIdFromToken,
+    isSessionOrganizer,
+    sendError,
+} from "./organizerAuth.js";
 
 
 /**
@@ -176,7 +182,27 @@ export const handleMessage = async (client: Client, data: any) => {
 
             console.log("JOIN EVENT")
 
-            const { sessionId, role, participantId, userId } = payload;
+            const { sessionId, participantId, token } = payload;
+            let { userId } = payload;
+
+            // The role is decided here, not by the client. Anything that is
+            // not a verified organizer joins as a participant, or is refused
+            // when it asked to be an organizer.
+            const role: Client['role'] = payload.role === 'ORGANIZER' ? 'ORGANIZER' : 'PARTICIPANT';
+
+            if (role === 'ORGANIZER') {
+                const organizerId = getUserIdFromToken(token);
+                const allowed = organizerId !== null
+                    && typeof sessionId === 'string'
+                    && await isSessionOrganizer(organizerId, sessionId);
+
+                if (!allowed || organizerId === null) {
+                    sendError(client, 'ORGANIZER_AUTH_FAILED', 'You are not an organizer of this quiz.');
+                    break;
+                }
+
+                userId = organizerId;
+            }
 
             // A reconnecting client re-joins with the same participantId while
             // its previous socket may still be registered: the heartbeat can
@@ -290,7 +316,10 @@ export const handleMessage = async (client: Client, data: any) => {
          * query per poll.
          */
         case 'participants:refresh': {
-            const sessionId = client.sessionId || payload?.sessionId;
+            // Only the host asks for this, and the reply carries the join
+            // code, so it is limited to a verified organizer and to the
+            // session they joined.
+            const sessionId = authorizeOrganizerAction(client, payload);
             if (!sessionId) break;
 
             const [session, participants] = await Promise.all([
@@ -312,7 +341,8 @@ export const handleMessage = async (client: Client, data: any) => {
 
 
         case 'quiz:start': {
-            const { sessionId } = payload;
+            const sessionId = authorizeOrganizerAction(client, payload);
+            if (!sessionId) break;
             // A session the super-admin cancelled (or one that already
             // ended) must not be revived by a host coming back to the lobby.
             const { count } = await prisma.quizSession.updateMany({
@@ -325,7 +355,10 @@ export const handleMessage = async (client: Client, data: any) => {
         }
 
         case 'quiz:next-question': {
-            const { sessionId, questionIndex = 0 } = payload;
+            const sessionId = authorizeOrganizerAction(client, payload);
+            if (!sessionId) break;
+
+            const { questionIndex = 0 } = payload;
 
             const questions = await getCachedQuestions(sessionId);
 
@@ -504,8 +537,7 @@ export const handleMessage = async (client: Client, data: any) => {
 
         case 'quiz:end': {
 
-            const { sessionId } = payload;
-
+            const sessionId = authorizeOrganizerAction(client, payload);
             if (!sessionId) break;
 
             if (sessionTimers.has(sessionId)) {

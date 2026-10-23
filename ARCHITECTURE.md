@@ -171,7 +171,7 @@ A raw `ws` server. Every message is `{ type, payload }`.
 
 | Type | Sent by | Effect |
 |---|---|---|
-| `join` | both | Binds the socket to a session and role |
+| `join` | both | Binds the socket to a session and role. An organizer must send their login `token`; the server checks it |
 | `quiz:start` | organizer | Starts the quiz |
 | `quiz:next-question` | organizer | Broadcasts the next question, starts its timer |
 | `quiz:submit-answer` | participant | Scores the answer, updates the leaderboard |
@@ -182,6 +182,7 @@ A raw `ws` server. Every message is `{ type, payload }`.
 | Type | Meaning |
 |---|---|
 | `participants:sync` | Full participant list (sent on organizer join) |
+| `error` | A message was refused, with a `code` such as `NOT_ORGANIZER`, `SESSION_MISMATCH` or `ORGANIZER_AUTH_FAILED` |
 | `participant:joined` | Someone new joined the lobby |
 | `quiz:start` | Quiz has begun |
 | `quiz:question` | The current question — **answers stripped of `isCorrect`** |
@@ -197,6 +198,14 @@ Two security-relevant details:
    which option is correct, so you cannot cheat by reading the socket.
 2. **Scoring happens server-side.** The client sends `timeMs`; the server
    decides correctness and points.
+3. **The organizer role is decided by the server.** A `join` that asks for
+   `ORGANIZER` must carry the host's JWT. The ws-server verifies it with the
+   same `JWT_SECRET` as http-server and checks that the user is an accepted
+   `QuizOrganizer` of the quiz behind the session. Otherwise it answers with an
+   `error` message (`ORGANIZER_AUTH_FAILED`) and the socket stays out of the
+   session. `quiz:start`, `quiz:next-question`, `quiz:end` and
+   `participants:refresh` are only accepted from a verified organizer and only
+   for the session that socket joined.
 
 Scoring rewards speed:
 
