@@ -32,7 +32,7 @@ function LiveQuiz({ isOrganizer = false }: LiveQuizProps) {
   const location = useLocation();
   const navigate = useNavigate();
 
-  const { user } = useAuthStore();
+  const { user, token } = useAuthStore();
 
   // location.state is gone after a reload, so fall back to what JoinQuiz
   // stored. Without this a participant who refreshed mid-quiz was treated as
@@ -220,7 +220,10 @@ function LiveQuiz({ isOrganizer = false }: LiveQuizProps) {
             sessionId,
             role: isOrganizer ? 'ORGANIZER' : 'PARTICIPANT',
             participantId: isOrganizer ? undefined : participantId,
-            userId: user?.id
+            userId: user?.id,
+            // The server checks this login before it lets the socket run the
+            // quiz, so a participant cannot claim the organizer role.
+            token: isOrganizer ? token : undefined
           }
         }));
 
@@ -248,6 +251,11 @@ function LiveQuiz({ isOrganizer = false }: LiveQuizProps) {
         const { type, payload } = JSON.parse(event.data);
 
         switch (type) {
+          case 'error':
+            // The server refused a message, for example when this login is not
+            // an organizer of the quiz.
+            console.error('[ws]', payload?.code, payload?.message);
+            break;
           case 'participants:sync':
             setParticipants(payload.participants);
             if (payload.joinCode) {
