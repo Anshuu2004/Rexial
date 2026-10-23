@@ -70,7 +70,11 @@ If you want to work on any of the following, there is real code here to work on:
 - Model output is validated: anything without exactly 4 options and 1 correct answer
   is discarded rather than shown
 
-**Live video quizzes (v3, planned)** — WebRTC host streaming, in-quiz explanations.
+**Live video quizzes (v3, in progress)**
+- The host and co-hosts run the quiz on camera; players watch and listen
+- Players appear only as their avatar, raise a hand, and speak once a host lets them in
+- Up to 300 players per live video session
+- Optional: self-hosted [LiveKit](https://livekit.io) over WebRTC, off unless you configure it — see [apps/streaming](apps/streaming/README.md)
 
 ## Architecture
 
@@ -98,6 +102,7 @@ If you want to work on any of the following, there is real code here to work on:
 | `apps/http-server` | Node + Express | 4000 |
 | `apps/ws-server` | WebSockets | 8080 |
 | `apps/genAI` | Python + FastAPI | 8000 |
+| `apps/streaming` | Node + Express, LiveKit (optional) | 7000 |
 | `packages/db` | Prisma + PostgreSQL | 5432 |
 | `apps/admin` | React (super-admin panel) | 5174 |
 | `apps/admin-server` | Node + Express (admin API) | 5000 |

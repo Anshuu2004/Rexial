@@ -61,6 +61,16 @@ refused with `ORGANIZER_AUTH_FAILED`:
 cp apps/ws-server/.env.example apps/ws-server/.env
 ```
 
+*Working on **live video**? `/apps/streaming` needs the same `JWT_SECRET` too:
+
+```bash
+cp apps/streaming/.env.example apps/streaming/.env
+docker compose --profile streaming up
+```
+
+and run the frontend with `VITE_STREAMING_URL=http://localhost:7000`. See
+[apps/streaming/README.md](apps/streaming/README.md).
+
 *The **GenAI service** (`/apps/genAI`) has its own env. Copy the example:
 
 ```bash
