@@ -195,19 +195,25 @@ export async function startQuestionTimer(
     // then finished early by however much it had skipped.
     const endsAt = Date.now() + question.timeLimit * 1_000;
 
-    const timer = setInterval(async () => {
+    const timer = setInterval(() => {
         timeLeft = Math.max(0, Math.ceil((endsAt - Date.now()) / 1_000));
         broadcastToSession(sessionId, 'quiz:timer-tick', { timeLeft });
 
         if (timeLeft <= 0) {
-            // Stop ticking before the await: at 750 clients a broadcast takes
+            // Stop ticking before closing: at 750 clients a broadcast takes
             // long enough that another tick can fire while this one is still
             // closing the question, which is how the countdown ran past zero.
             clearInterval(timer);
             sessionTimers.delete(sessionId);
 
             // Same close as an early finish, so the two cannot diverge.
-            await finishQuestion(sessionId, questionIndex, true);
+            // Nothing awaits an interval callback, so a Redis or Postgres
+            // error in here has to be caught on the spot. Left alone it is an
+            // unhandled rejection, and on Node 22 that takes down the whole
+            // process and every quiz running on it.
+            finishQuestion(sessionId, questionIndex, true).catch((err) =>
+                console.error('[timer] countdown finish failed', { sessionId, questionIndex }, err),
+            );
         }
     }, 1_000);
 

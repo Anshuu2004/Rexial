@@ -37,6 +37,14 @@ app.use("/api/v1", inviteRoutes)
 
 
 
+// Node 22 exits on an unhandled rejection, taking every in-flight request
+// with it. Express 5 already catches rejections from route handlers, so this
+// is a backstop for anything outside a request, not a substitute for handling
+// errors where they happen.
+process.on('unhandledRejection', (reason) => {
+    console.error('[process] unhandled rejection', reason)
+})
+
 app.listen(PORT, () => {
     console.log(`Server: I'm still alive...at ${PORT}`)
 })
