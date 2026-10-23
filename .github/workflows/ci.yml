@@ -63,6 +63,11 @@ jobs:
       - name: Type-check
         run: pnpm run check-types
 
+      # The ws-server authorization tests (who may start, advance or end a
+      # quiz) mock the database and Redis, so no services are needed.
+      - name: Test ws-server
+        run: pnpm --filter ws-server run test
+
       # The super-admin panel (apps/admin, apps/admin-server) is deployed
       # by hand to Vercel / Render and is deliberately left out of CI.
       - name: Build all workspaces
