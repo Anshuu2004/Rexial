@@ -360,13 +360,15 @@ function LiveQuiz({ isOrganizer = false }: LiveQuizProps) {
             break;
           case 'quiz:leaderboard':
             setLeaderboard(payload.leaderboard);
-            setGameState(GameState.LEADERBOARD);
+            // The standings follow a question's results by two seconds, so
+            // pressing on during that gap on the last question ends the quiz
+            // first. Keep the late scores, they are the final ones, but stay
+            // on the finished screen rather than reopening the leaderboard
+            // with a "Next Question" button for a quiz that is over.
+            setGameState((current) => current === GameState.ENDED ? current : GameState.LEADERBOARD);
             break;
           case 'quiz:ended':
             setGameState(GameState.ENDED);
-            // For good: the room is closed, and a stray state change after
-            // the end must not bring the video back to ask for it.
-            setLiveVideo(false);
             break;
         }
       };
