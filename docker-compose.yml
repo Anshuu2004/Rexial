@@ -21,6 +21,10 @@ services:
       - "8080:8080"
     volumes:
       - .:/app
+    # Share the HTTP server's signing secret so organizer tokens verify here.
+    env_file:
+      - path: apps/http-server/.env
+        required: false
     environment:
       - DATABASE_URL=postgresql://postgres:postgres@db:5432/Qtrive
       - REDIS_HOST=redis    
