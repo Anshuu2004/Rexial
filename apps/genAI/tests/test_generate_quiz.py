@@ -1,7 +1,9 @@
 import json
 
+import pytest
+
 from app import main
-from tests.conftest import SAMPLE_PDF, make_pdf, question, quiz_reply
+from tests.conftest import SAMPLE_PDF, encrypted_pdf, make_pdf, question, quiz_reply
 
 
 def post_quiz(client, pdf=SAMPLE_PDF, content_type="application/pdf", **fields):
@@ -133,6 +135,38 @@ def test_pdf_without_text_is_422(client, groq):
     assert res.status_code == 422
     assert "no selectable text" in res.json()["detail"]
     assert groq.prompts == []
+
+
+def test_encrypted_pdf_is_422_not_a_provider_error(client, groq):
+    res = post_quiz(client, pdf=encrypted_pdf(SAMPLE_PDF))
+
+    assert res.status_code == 422
+    assert "password protected" in res.json()["detail"]
+    assert groq.prompts == []
+
+
+@pytest.mark.parametrize(
+    "pdf",
+    [b"", b"this is not a pdf", SAMPLE_PDF[:60]],
+    ids=["empty-file", "not-a-pdf", "truncated"],
+)
+def test_unreadable_pdf_is_400_not_a_provider_error(client, groq, pdf):
+    res = post_quiz(client, pdf=pdf)
+
+    assert res.status_code == 400
+    assert "could not be read" in res.json()["detail"]
+    assert "AI provider" not in res.json()["detail"]
+    assert groq.prompts == []
+
+
+@pytest.mark.parametrize("reply", ["[]", '{"questions": "nope"}', "{}"])
+def test_wrong_json_shape_is_502_unusable(client, groq, reply):
+    groq.reply(reply)
+
+    res = post_quiz(client)
+
+    assert res.status_code == 502
+    assert "unusable response" in res.json()["detail"]
 
 
 def test_upload_is_deleted_after_success_and_failure(client, groq, upload_dir):

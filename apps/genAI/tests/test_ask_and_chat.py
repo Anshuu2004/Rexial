@@ -1,4 +1,4 @@
-from tests.conftest import SAMPLE_PDF, make_pdf
+from tests.conftest import SAMPLE_PDF, encrypted_pdf, make_pdf
 
 
 def ask(client, query, pdf=SAMPLE_PDF):
@@ -28,6 +28,20 @@ def test_ask_pdf_answers_from_retrieved_context(client, groq, fake_embeddings, u
 
 def test_ask_pdf_without_text_is_422(client, groq, fake_embeddings):
     assert ask(client, "anything", pdf=make_pdf()).status_code == 422
+
+
+def test_ask_pdf_encrypted_is_422(client, groq, fake_embeddings):
+    res = ask(client, "anything", pdf=encrypted_pdf(SAMPLE_PDF))
+
+    assert res.status_code == 422
+    assert "password protected" in res.json()["detail"]
+
+
+def test_ask_pdf_corrupt_is_400(client, groq, fake_embeddings):
+    res = ask(client, "anything", pdf=b"this is not a pdf")
+
+    assert res.status_code == 400
+    assert "AI provider" not in res.json()["detail"]
 
 
 def test_chat_answers_directly_when_no_search_needed(client, gemini):
