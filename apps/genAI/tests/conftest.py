@@ -1,9 +1,11 @@
+import io
 import json
 from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
 from langchain_core.embeddings import Embeddings
+from pypdf import PdfReader, PdfWriter
 
 from app import main
 from app.agent import Qnagent
@@ -50,6 +52,19 @@ def make_pdf(*lines: str) -> bytes:
     )
 
     return out
+
+
+def encrypted_pdf(pdf: bytes, password: str = "secret") -> bytes:
+    """Return `pdf` locked behind a password."""
+
+    writer = PdfWriter()
+    writer.append(PdfReader(io.BytesIO(pdf)))
+    writer.encrypt(password)
+
+    out = io.BytesIO()
+    writer.write(out)
+
+    return out.getvalue()
 
 
 SAMPLE_PDF = make_pdf(

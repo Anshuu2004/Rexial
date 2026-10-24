@@ -11,7 +11,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from app.agent.Qnagent import chat
-from app.rag.rag_system import PdfHasNoText, ask_pdf, generate_questions, generate_quiz
+from app.rag.rag_system import PdfProblem, ask_pdf, generate_questions, generate_quiz
 from app.utils.config import MissingAPIKey
 from app.utils.errors import provider_http_error
 
@@ -43,10 +43,12 @@ async def missing_api_key_handler(request: Request, exc: MissingAPIKey):
     )
 
 
-@app.exception_handler(PdfHasNoText)
-async def pdf_has_no_text_handler(request: Request, exc: PdfHasNoText):
+@app.exception_handler(PdfProblem)
+async def pdf_problem_handler(request: Request, exc: PdfProblem):
+    """Report a bad PDF (scanned, encrypted, corrupt) as the client's problem."""
+
     return JSONResponse(
-        status_code=422,
+        status_code=exc.status_code,
         content={"detail": str(exc)},
     )
 
@@ -140,7 +142,7 @@ async def generate_pdf_questions(
                 str(file_path),
                 user_query
             )
-        except (MissingAPIKey, PdfHasNoText):
+        except (MissingAPIKey, PdfProblem):
             raise
         except Exception as exc:
             raise provider_http_error(exc) from exc
@@ -165,7 +167,7 @@ async def ask_pdf_question(
                 str(file_path),
                 user_query
             )
-        except (MissingAPIKey, PdfHasNoText):
+        except (MissingAPIKey, PdfProblem):
             raise
         except Exception as exc:
             raise provider_http_error(exc) from exc
@@ -234,7 +236,7 @@ async def generate_quiz_endpoint(
                 status_code=502,
                 detail=f"The model returned an unusable response: {exc}"
             ) from exc
-        except (MissingAPIKey, PdfHasNoText):
+        except (MissingAPIKey, PdfProblem):
             raise
         except Exception as exc:
             raise provider_http_error(exc) from exc

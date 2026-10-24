@@ -6,6 +6,7 @@ from langchain_core.embeddings import Embeddings
 from langchain_core.vectorstores import InMemoryVectorStore
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from pypdf import PdfReader
+from pypdf.errors import FileNotDecryptedError
 
 from app.prompts.quiz_json_prompt import QUIZ_JSON_PROMPT
 from app.prompts.rag_Qna_generate_prompt import QUESTION_GENERATION_PROMPT
@@ -21,8 +22,27 @@ DIFFICULTIES = ("Low", "Medium", "High")
 _embeddings = None
 
 
-class PdfHasNoText(Exception):
+class PdfProblem(Exception):
+    """A problem with the uploaded PDF itself, not with the AI provider.
+
+    `status_code` is the HTTP status main.py answers with.
+    """
+
+    status_code = 422
+
+
+class PdfHasNoText(PdfProblem):
     """Raised when a PDF has no extractable text, e.g. a scanned document."""
+
+
+class PdfEncrypted(PdfProblem):
+    """Raised when a PDF is password protected and cannot be read."""
+
+
+class PdfUnreadable(PdfProblem):
+    """Raised when a file is corrupt, truncated or empty, so it cannot be parsed."""
+
+    status_code = 400
 
 
 class FastEmbedEmbeddings(Embeddings):
@@ -60,13 +80,27 @@ def get_embeddings():
 def load_pdf_chunks(pdf_path: str, chunk_size: int, chunk_overlap: int) -> list[Document]:
     """Read a PDF page by page and split it into overlapping chunks."""
 
-    documents = [
-        Document(
-            page_content=page.extract_text() or "",
-            metadata={"source": pdf_path, "page": number},
-        )
-        for number, page in enumerate(PdfReader(pdf_path).pages)
-    ]
+    try:
+        documents = [
+            Document(
+                page_content=page.extract_text() or "",
+                metadata={"source": pdf_path, "page": number},
+            )
+            for number, page in enumerate(PdfReader(pdf_path).pages)
+        ]
+    except FileNotDecryptedError as exc:
+        raise PdfEncrypted(
+            "This PDF is password protected. Remove the password and "
+            "upload it again."
+        ) from exc
+    except Exception as exc:
+        # pypdf raises its own errors for bad files, but also the odd
+        # KeyError or ValueError on a mangled one; none of them are the
+        # provider's fault
+        raise PdfUnreadable(
+            "This PDF could not be read. It may be corrupt or not a real "
+            "PDF. Try exporting it again."
+        ) from exc
 
     if not any(doc.page_content.strip() for doc in documents):
         raise PdfHasNoText(
@@ -234,6 +268,9 @@ def generate_quiz(
     response = get_groq_llm().invoke(prompt)
 
     payload = _extract_json(str(response.content))
+
+    if not isinstance(payload, dict) or not isinstance(payload.get("questions"), list):
+        raise ValueError('Model response was not an object with a "questions" list.')
 
     questions = []
 
