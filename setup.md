@@ -64,6 +64,17 @@ FRONTEND_URL=http://localhost:5173
 
 ```
 
+If you run the WebSocket server outside Docker, copy its example environment
+file and set `JWT_SECRET` to the **same value** as in `apps/http-server/.env`:
+
+```bash
+cp apps/ws-server/.env.example apps/ws-server/.env
+```
+
+With Docker Compose, `ws-server` reads `apps/http-server/.env` directly so
+both services use the same signing secret. You do not need a separate
+`apps/ws-server/.env` for `docker compose up`.
+
 *Create a `.env` file in `/apps/genAI` (copy from `.env.example`)
 ```bash
 cp apps/genAI/.env.example apps/genAI/.env

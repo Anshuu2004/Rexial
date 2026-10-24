@@ -52,14 +52,17 @@ FRONTEND_URL=http://localhost:5173
 
 ```
 
-*and in `/apps/ws-server` (copy `.env.example`) put the **same** `JWT_SECRET` as
-http-server. The ws-server uses it to check the host's login before it lets a
-socket start, advance or end a quiz. If the two values differ the host is
-refused with `ORGANIZER_AUTH_FAILED`:
+*When running `/apps/ws-server` outside Docker*, copy `.env.example` and put
+the **same** `JWT_SECRET` as http-server. The ws-server uses it to check the
+host's login before it lets a socket start, advance or end a quiz. If the two
+values differ the host is refused with `ORGANIZER_AUTH_FAILED`:
 
 ```bash
 cp apps/ws-server/.env.example apps/ws-server/.env
 ```
+
+Docker Compose passes `apps/http-server/.env` to ws-server directly, so a
+separate ws-server `.env` is not required when using `docker compose up`.
 
 *Working on **live video**? `/apps/streaming` needs the same `JWT_SECRET` too:
 
