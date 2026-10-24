@@ -1,6 +1,6 @@
 # LiveKit media server config for production (docker-compose.prod.yml).
 # Keys are not stored here: the container reads them from LIVEKIT_KEYS in
-# .env.prod, as "<api key>: <api secret>", and apps/streaming signs tokens
+# the deploy directory's .env, as "<api key>: <api secret>", and apps/streaming signs tokens
 # with the same pair (LIVEKIT_API_KEY / LIVEKIT_API_SECRET).
 
 port: 7880            # signaling (WebSocket), proxied by nginx as live.<domain>

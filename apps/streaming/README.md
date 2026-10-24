@@ -104,25 +104,34 @@ pnpm --filter streaming test
 Live video is **opt-in** in `docker-compose.prod.yml` (the `streaming`
 profile), so an existing deployment is not affected until you turn it on.
 
-1. **Keys.** Generate an API key and a secret of at least 32 characters, and
-   add to `.env.prod`:
+1. **Keys.** Generate an API key and a secret of at least 32 characters.
+   This service reads them from `.env.prod`:
    ```bash
-   LIVEKIT_KEYS="<key>: <secret>"        # read by the LiveKit container
-   LIVEKIT_API_KEY=<key>                  # read by this service
+   LIVEKIT_API_KEY=<key>
    LIVEKIT_API_SECRET=<secret>
    LIVEKIT_PUBLIC_URL=wss://live.<your-domain>
    CORS_ORIGIN=https://<your-domain>
    ```
-   This service refuses to start in production without real keys.
+   The LiveKit container gets the same pair from the `.env` next to
+   `docker-compose.prod.yml`, which compose reads automatically:
+   ```bash
+   COMPOSE_PROFILES=streaming
+   LIVEKIT_KEYS="<key>: <secret>"
+   ```
+   Keep `LIVEKIT_KEYS` out of `.env.prod`, and never give LiveKit
+   `.env.prod`: it would pick up `REDIS_HOST` and fail to start in
+   multi-node mode. This service refuses to start in production without
+   real keys.
 2. **Proxy hosts** in nginx-proxy-manager, both with **Websockets Support** on:
    - `stream.<your-domain>` → `streaming:7000`
    - `live.<your-domain>` → `livekit:7880`
 3. **Firewall.** Media cannot go through nginx. Open `7881/tcp` and
    `7882/udp` (`ufw allow 7881/tcp && ufw allow 7882/udp`, plus your
    provider's firewall).
-4. **Turn it on.** Put `COMPOSE_PROFILES=streaming` in the `.env` next to
-   `docker-compose.prod.yml` on the server. CD already builds the
-   `rexial-streaming` image on every deploy.
+4. **Turn it on.** With `COMPOSE_PROFILES=streaming` in that `.env`, the
+   next `docker compose -f docker-compose.prod.yml up -d` starts LiveKit and
+   this service. CD already builds the `rexial-streaming` image on every
+   deploy.
 5. **Frontend.** Add `VITE_STREAMING_URL=https://stream.<your-domain>` to
    `apps/frontend/.env.production`. That shows the button to hosts.
 
