@@ -112,10 +112,11 @@ function Signup() {
 
           {/* Name */}
           <div>
-            <label className="block text-sm sm:text-base text-zinc-400 mb-1 font-main tracking-wide">
+            <label htmlFor="signup-name" className="block text-sm sm:text-base text-zinc-400 mb-1 font-main tracking-wide">
               Full Name
             </label>
             <input
+              id="signup-name"
               type="text"
               value={name}
               onChange={e => setName(e.target.value)}
@@ -127,10 +128,11 @@ function Signup() {
 
           {/* Email */}
           <div>
-            <label className="block text-sm sm:text-base text-zinc-400 mb-1 font-main tracking-wide">
+            <label htmlFor="signup-email" className="block text-sm sm:text-base text-zinc-400 mb-1 font-main tracking-wide">
               Email Address
             </label>
             <input
+              id="signup-email"
               type="email"
               value={email}
               onChange={e => setEmail(e.target.value)}
@@ -142,10 +144,11 @@ function Signup() {
 
           {/* Password */}
           <div>
-            <label className="block text-sm sm:text-base text-zinc-400 mb-1 font-main tracking-wide">
+            <label htmlFor="signup-password" className="block text-sm sm:text-base text-zinc-400 mb-1 font-main tracking-wide">
               Password
             </label>
             <input
+              id="signup-password"
               type="password"
               value={password}
               onChange={e => setPassword(e.target.value)}
