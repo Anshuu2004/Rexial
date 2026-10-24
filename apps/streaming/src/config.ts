@@ -33,10 +33,4 @@ export const config = {
         apiKey: livekitSetting('LIVEKIT_API_KEY', 'devkey'),
         apiSecret: livekitSetting('LIVEKIT_API_SECRET', 'rexial-local-dev-secret-not-for-production'),
     },
-
-    redis: {
-        host: process.env.REDIS_HOST || 'redis',
-        port: parseInt(process.env.REDIS_PORT || '6379', 10),
-        password: process.env.REDIS_PASSWORD || undefined,
-    },
 };

@@ -13,7 +13,7 @@ host's moderation.
 ```
   browser ──REST──► streaming (:7000) ──server API──► LiveKit (:7880)
      │                   │  checks JWTs, Postgres             ▲
-     │                   └── hears 'quiz:ended' on Redis      │
+     │                   └── checks rooms every 10s           │
      └──────────── WebRTC media (UDP 7882 / TCP 7881) ────────┘
 ```
 
@@ -33,9 +33,17 @@ something extra on top: if the streaming service is down, the quiz still works.
 4. The room is created on first request, with LiveKit's participant limit set
    to 300 players plus 20 host seats. The LiveKit server runs with
    `auto_create: false`, so no client can open a room without these limits.
-5. When `ws-server` publishes `quiz:ended`, this service deletes the room and
-   everyone is disconnected. Any room that never sees that event, such as a
-   session cancelled from the admin panel, closes after 5 minutes empty.
+5. The call outlives the quiz. On the final leaderboard the host can talk
+   about the results, take questions and let players speak, and players
+   who reload can rejoin. Every 10 seconds this service checks the open
+   rooms against Postgres and closes the room of a **finished** quiz:
+   - 30 seconds after the last host leaves (time to reload the page);
+   - at once when the host clicks **End video for everyone**;
+   - one hour after the quiz ended, whatever is going on.
+
+   While a quiz is running a room is never closed this way, so a host
+   reloading mid-quiz does not end the call. A cancelled session's room
+   closes at once, and an empty room closes after 5 minutes.
 
 ## Who may do what
 
@@ -73,6 +81,7 @@ All routes are under `/api/v1/stream`, with `Authorization: Bearer <token>`.
 | `POST /sessions/:sessionId/hand` `{ raised }` | player | Raise or lower a hand |
 | `PUT /sessions/:sessionId/speakers/:participantId` | host | Let a player speak |
 | `DELETE /sessions/:sessionId/speakers/:participantId` | host | Take the microphone back |
+| `DELETE /sessions/:sessionId/room` | host | End the video for everyone |
 | `GET /health` | anyone | Liveness |
 
 ## Running it locally

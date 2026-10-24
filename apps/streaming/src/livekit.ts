@@ -1,4 +1,4 @@
-import { AccessToken, RoomServiceClient, TrackSource } from 'livekit-server-sdk';
+import { AccessToken, RoomServiceClient, ServerError, TrackSource } from 'livekit-server-sdk';
 import type { ParticipantPermission } from 'livekit-server-sdk';
 import { config } from './config.js';
 import type { Caller } from './auth.js';
@@ -23,7 +23,23 @@ export const roomService = new RoomServiceClient(
     config.livekit.apiSecret,
 );
 
-export const roomName = (sessionId: string) => `quiz-${sessionId}`;
+const ROOM_PREFIX = 'quiz-';
+
+export const roomName = (sessionId: string) => `${ROOM_PREFIX}${sessionId}`;
+
+/** The session a room belongs to, or null for a room this service did not name. */
+export const sessionIdOf = (room: string) =>
+    room.startsWith(ROOM_PREFIX) ? room.slice(ROOM_PREFIX.length) : null;
+
+/** Close a room, treating one that is already gone as closed. */
+export async function closeRoom(sessionId: string) {
+    try {
+        await roomService.deleteRoom(roomName(sessionId));
+    } catch (err) {
+        if (err instanceof ServerError && err.status === 404) return;
+        throw err;
+    }
+}
 
 export const playerIdentity = (participantId: string) => `player-${participantId}`;
 

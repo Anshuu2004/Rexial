@@ -1063,10 +1063,17 @@ function LiveQuiz({ isOrganizer = false }: LiveQuizProps) {
 
   return (
     <>
-      {/* First, so on narrow screens its space is held above the quiz. */}
-      {streamingEnabled && liveVideo && sessionId && gameState !== GameState.ENDED && (
+      {/* First, so on narrow screens its space is held above the quiz. It
+          stays on the final screen too, for the host to talk about the
+          results; it goes when the host ends the call or leaves. */}
+      {streamingEnabled && liveVideo && sessionId && (
         <Suspense fallback={null}>
-          <LiveStage sessionId={sessionId} isOrganizer={isOrganizer} authToken={stageToken} />
+          <LiveStage
+            sessionId={sessionId}
+            isOrganizer={isOrganizer}
+            authToken={stageToken}
+            quizEnded={gameState === GameState.ENDED}
+          />
         </Suspense>
       )}
       {renderScreen()}

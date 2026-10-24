@@ -252,8 +252,11 @@ out the host's moderation, so it is small and stays out of the media path.
   watch-and-listen tokens; a host grants a player the mic through the LiveKit
   server API, and takes it back the same way.
 - Rooms are created only by this service (LiveKit runs with `auto_create`
-  off), with the participant limit set. It closes a room when it hears
-  `quiz:ended` on the same Redis channel ws-server already publishes to.
+  off), with the participant limit set. The call outlives the quiz so the
+  host can talk over the results; a 10-second check against Postgres closes
+  a finished quiz's room 30 seconds after the last host leaves, when the
+  host ends it, or an hour after the end. A running quiz's room is never
+  closed this way, so a host reload mid-quiz is harmless.
 - Off unless configured: without `VITE_STREAMING_URL` the frontend never
   offers it and never loads the LiveKit client.
 

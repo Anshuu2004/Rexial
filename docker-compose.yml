@@ -100,16 +100,11 @@ services:
       - .:/app
     environment:
       - DATABASE_URL=postgresql://postgres:postgres@db:5432/Qtrive
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
-      - REDIS_PASSWORD=thisistheredisPassword
       - LIVEKIT_URL=http://livekit:7880
       - LIVEKIT_PUBLIC_URL=ws://localhost:7880
     command: sh -c "pnpm --filter @repo/db run db:generate && pnpm run dev"
     depends_on:
       db:
-        condition: service_healthy
-      redis:
         condition: service_healthy
       livekit:
         condition: service_started

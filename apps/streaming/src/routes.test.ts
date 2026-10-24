@@ -14,6 +14,8 @@ const mocks = vi.hoisted(() => {
         },
         createRoom: vi.fn(),
         updateParticipant: vi.fn(),
+        listRooms: vi.fn(),
+        deleteRoom: vi.fn(),
     };
 });
 
@@ -27,6 +29,8 @@ vi.mock("livekit-server-sdk", async (importOriginal) => {
     class RoomServiceClient {
         createRoom = mocks.createRoom;
         updateParticipant = mocks.updateParticipant;
+        listRooms = mocks.listRooms;
+        deleteRoom = mocks.deleteRoom;
     }
 
     return { ...actual, RoomServiceClient };
@@ -65,6 +69,8 @@ beforeEach(() => {
     );
     mocks.createRoom.mockResolvedValue({});
     mocks.updateParticipant.mockResolvedValue({});
+    mocks.listRooms.mockResolvedValue([]);
+    mocks.deleteRoom.mockResolvedValue(undefined);
 });
 
 function call(method: string, path: string, token?: string, body?: unknown) {
@@ -123,9 +129,27 @@ describe("joining the video room", () => {
         expect(res.status).toBe(409);
     });
 
-    it("refuses a session that has ended", async () => {
+    it("refuses a finished quiz whose room has closed", async () => {
         mocks.prisma.quizSession.findUnique.mockResolvedValue({ status: "COMPLETED", liveVideo: true });
         const res = await call("POST", `/sessions/${SESSION}/token`, playerToken());
+        expect(res.status).toBe(410);
+        expect(mocks.createRoom).not.toHaveBeenCalled();
+    });
+
+    it("lets people back into a finished quiz's room while the host keeps it open", async () => {
+        mocks.prisma.quizSession.findUnique.mockResolvedValue({ status: "COMPLETED", liveVideo: true });
+        mocks.listRooms.mockResolvedValue([{ name: `quiz-${SESSION}` }]);
+
+        const res = await call("POST", `/sessions/${SESSION}/token`, playerToken());
+        expect(res.status).toBe(200);
+        // Rejoined, never reopened.
+        expect(mocks.createRoom).not.toHaveBeenCalled();
+    });
+
+    it("refuses a cancelled session even if its room is still open", async () => {
+        mocks.prisma.quizSession.findUnique.mockResolvedValue({ status: "CANCELLED", liveVideo: true });
+        mocks.listRooms.mockResolvedValue([{ name: `quiz-${SESSION}` }]);
+        const res = await call("POST", `/sessions/${SESSION}/token`, hostToken());
         expect(res.status).toBe(410);
     });
 
@@ -242,5 +266,25 @@ describe("letting a player speak", () => {
         expect(identity).toBe("player-p-1");
         expect(options.attributes).toEqual({ speaker: "" });
         expect(options.permission).toMatchObject({ canPublish: false });
+    });
+});
+
+describe("ending the video", () => {
+    it("closes the room for everyone when the host asks", async () => {
+        const res = await call("DELETE", `/sessions/${SESSION}/room`, hostToken());
+        expect(res.status).toBe(200);
+        expect(mocks.deleteRoom).toHaveBeenCalledWith(`quiz-${SESSION}`);
+    });
+
+    it("treats a room that is already gone as closed", async () => {
+        mocks.deleteRoom.mockRejectedValue(new ServerError("not_found", "room not found", 404));
+        const res = await call("DELETE", `/sessions/${SESSION}/room`, hostToken());
+        expect(res.status).toBe(200);
+    });
+
+    it("is refused to a player", async () => {
+        const res = await call("DELETE", `/sessions/${SESSION}/room`, playerToken());
+        expect(res.status).toBe(403);
+        expect(mocks.deleteRoom).not.toHaveBeenCalled();
     });
 });

@@ -7,6 +7,7 @@ import { config } from './config.js';
 import {
     LISTENER_PERMISSION,
     SPEAKER_PERMISSION,
+    closeRoom,
     createJoinToken,
     ensureRoom,
     identityOf,
@@ -52,11 +53,17 @@ router.post('/sessions/:sessionId/token', async (req: Request<{ sessionId: strin
 
     if (!session) return errorResponse(res, 404, 'Quiz session not found.');
     if (!session.liveVideo) return errorResponse(res, 409, 'This quiz is not running with live video.');
-    if (session.status === 'COMPLETED' || session.status === 'CANCELLED') {
-        return errorResponse(res, 410, 'This quiz has ended.');
-    }
+    if (session.status === 'CANCELLED') return errorResponse(res, 410, 'This quiz has ended.');
 
-    await ensureRoom(sessionId);
+    if (session.status === 'COMPLETED') {
+        // After the final leaderboard the call carries on only while the host
+        // keeps it open (see roomReaper). Rejoining it, after a reload say, is
+        // fine; opening a fresh room for a finished quiz is not.
+        const [room] = await roomService.listRooms([roomName(sessionId)]);
+        if (!room) return errorResponse(res, 410, 'This quiz has ended.');
+    } else {
+        await ensureRoom(sessionId);
+    }
 
     return res.status(200).json({
         url: config.livekit.publicUrl,
@@ -128,6 +135,22 @@ router.delete('/sessions/:sessionId/speakers/:participantId', async (req: Reques
     });
 
     return res.status(200).json({ speaking: false });
+});
+
+/**
+ * End the video for everyone, the host's way of closing the call after the
+ * results. Leaving the page has the same effect after a short grace period.
+ */
+router.delete('/sessions/:sessionId/room', async (req: Request<{ sessionId: string }>, res) => {
+    const caller = await requireCaller(req, res);
+    if (!caller) return;
+
+    if (caller.kind !== 'organizer') {
+        return errorResponse(res, 403, 'Only the host can end the video.');
+    }
+
+    await closeRoom(req.params.sessionId);
+    return res.status(200).json({ closed: true });
 });
 
 export default router;

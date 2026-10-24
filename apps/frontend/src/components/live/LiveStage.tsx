@@ -21,6 +21,7 @@ import { LuChevronDown, LuMaximize2, LuMinimize2 } from 'react-icons/lu';
 import { getAvatar, getAvatarColor } from '../../utils/Avatars';
 import {
   allowToSpeak,
+  endVideo,
   fetchRoomAccess,
   setHandRaised,
   stopSpeaking,
@@ -33,6 +34,8 @@ interface LiveStageProps {
   isOrganizer: boolean;
   /** The host's login token, or the participant token from /session/join. */
   authToken: string | null;
+  /** The final leaderboard is up; the host may now end the call. */
+  quizEnded: boolean;
 }
 
 /**
@@ -46,7 +49,7 @@ interface LiveStageProps {
  * Mounted once for the whole quiz (LiveQuiz keeps it outside the per-state
  * screens), so moving between questions never drops the call.
  */
-function LiveStage({ sessionId, isOrganizer, authToken }: LiveStageProps) {
+function LiveStage({ sessionId, isOrganizer, authToken, quizEnded }: LiveStageProps) {
   const [access, setAccess] = useState<RoomAccess | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [ended, setEnded] = useState(false);
@@ -146,7 +149,7 @@ function LiveStage({ sessionId, isOrganizer, authToken }: LiveStageProps) {
               }
               className="h-full"
             >
-              <Stage sessionId={sessionId} isOrganizer={isOrganizer} authToken={authToken!} />
+              <Stage sessionId={sessionId} isOrganizer={isOrganizer} authToken={authToken!} quizEnded={quizEnded} />
               <RoomAudioRenderer />
               {/* Browsers block sound until the page is touched; this only
                   shows while that is the case. */}
@@ -181,7 +184,14 @@ const STAGE_EVENTS = [
 
 const isHost = (p: Participant) => p.attributes.role === 'host';
 
-function Stage({ sessionId, isOrganizer, authToken }: { sessionId: string; isOrganizer: boolean; authToken: string }) {
+interface StageProps {
+  sessionId: string;
+  isOrganizer: boolean;
+  authToken: string;
+  quizEnded: boolean;
+}
+
+function Stage({ sessionId, isOrganizer, authToken, quizEnded }: StageProps) {
   const participants = useParticipants({ updateOnlyOn: STAGE_EVENTS });
 
   const tracks = useTracks(
@@ -265,7 +275,10 @@ function Stage({ sessionId, isOrganizer, authToken }: { sessionId: string; isOrg
         )}
 
         {isOrganizer ? (
-          <HostControls />
+          <>
+            <HostControls />
+            {quizEnded && <EndCallButton sessionId={sessionId} authToken={authToken} />}
+          </>
         ) : (
           <PlayerControls sessionId={sessionId} authToken={authToken} />
         )}
@@ -436,6 +449,39 @@ const controlClass = (on: boolean) =>
   `flex-1 flex items-center justify-center gap-1 py-2 rounded-lg border text-xs sm:text-sm font-secondary font-bold cursor-pointer transition ${
     on ? 'border-pink-600/50 bg-pink-600/20 text-pink-200' : 'border-zinc-700 bg-zinc-800/60 text-zinc-400'
   }`;
+
+/**
+ * Shown to the host on the final screen. Leaving the page ends the call too,
+ * after a short grace period; this ends it for everyone at once.
+ */
+function EndCallButton({ sessionId, authToken }: { sessionId: string; authToken: string }) {
+  const [busy, setBusy] = useState(false);
+  const [problem, setProblem] = useState<string | null>(null);
+
+  return (
+    <div className="space-y-1">
+      <button
+        disabled={busy}
+        onClick={async () => {
+          setBusy(true);
+          setProblem(null);
+          try {
+            // The room closing disconnects everyone, this host included,
+            // and the stage removes itself.
+            await endVideo(sessionId, authToken);
+          } catch (err) {
+            setProblem(streamError(err, "Couldn't end the video."));
+            setBusy(false);
+          }
+        }}
+        className="w-full py-2 rounded-lg border border-red-600/60 bg-red-600/20 hover:bg-red-600/30 text-red-200 text-xs sm:text-sm font-secondary font-bold cursor-pointer disabled:opacity-50"
+      >
+        {busy ? 'Ending…' : 'End video for everyone'}
+      </button>
+      {problem && <p role="alert" className="text-[11px] sm:text-xs text-rose-300 font-secondary">{problem}</p>}
+    </div>
+  );
+}
 
 function HostControls() {
   const { localParticipant, isCameraEnabled, isMicrophoneEnabled, isScreenShareEnabled } = useLocalParticipant();
