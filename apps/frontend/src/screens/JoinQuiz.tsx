@@ -101,8 +101,9 @@ function JoinQuiz() {
 
                 <form onSubmit={handleJoin} className=" space-y-8 flex flex-col items-center justify-center">
                     <div>
-                        <label className="block text-md font-bold uppercase tracking-wider text-zinc-400 font-main  mb-1 ml-1">Game PIN</label>
+                        <label htmlFor="join-code" className="block text-md font-bold uppercase tracking-wider text-zinc-400 font-main  mb-1 ml-1">Game PIN</label>
                         <input
+                            id="join-code"
                             type="text"
                             value={code}
                             onChange={e => setCode(normalizeJoinCode(e.target.value))}
@@ -113,8 +114,9 @@ function JoinQuiz() {
                         />
                     </div>
                     <div>
-                        <label className="block text-md font-bold uppercase tracking-wider text-zinc-400 font-main mb-1 ml-1">Nickname</label>
+                        <label htmlFor="join-nickname" className="block text-md font-bold uppercase tracking-wider text-zinc-400 font-main mb-1 ml-1">Nickname</label>
                         <input
+                            id="join-nickname"
                             type="text"
                             value={username}
                             onChange={e => setUsername(e.target.value)}

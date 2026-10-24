@@ -55,8 +55,8 @@ describe('JoinQuiz input normalization', () => {
     it('normalizes a pasted PIN before applying the six-character limit and trims the nickname on submit', async () => {
         const user = renderJoin();
 
-        const codeInput = screen.getByPlaceholderText('e.g. XY3F12');
-        const nicknameInput = screen.getByPlaceholderText('Enter your name');
+        const codeInput = screen.getByLabelText('Game PIN');
+        const nicknameInput = screen.getByLabelText('Nickname');
 
         await user.click(codeInput);
         await user.paste(' XY3F12 ');
@@ -85,8 +85,8 @@ describe('JoinQuiz input normalization', () => {
     it('rejects a whitespace-only nickname without calling the join API', async () => {
         const user = renderJoin();
 
-        await user.type(screen.getByPlaceholderText('e.g. XY3F12'), 'AB12CD');
-        await user.type(screen.getByPlaceholderText('Enter your name'), '   ');
+        await user.type(screen.getByLabelText('Game PIN'), 'AB12CD');
+        await user.type(screen.getByLabelText('Nickname'), '   ');
         await user.click(screen.getByRole('button', { name: 'Enter Game' }));
 
         expect(await screen.findByText('Nickname cannot be empty')).toBeInTheDocument();
