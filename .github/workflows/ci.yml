@@ -68,6 +68,8 @@ jobs:
       - name: Test ws-server
         run: pnpm --filter ws-server run test
 
+      - name: Test frontend
+        run: pnpm --filter frontend run test
       # The super-admin panel (apps/admin, apps/admin-server) is deployed
       # by hand to Vercel / Render and is deliberately left out of CI.
       - name: Build all workspaces
