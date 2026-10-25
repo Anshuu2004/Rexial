@@ -115,7 +115,7 @@ model, request flows, caching, and the reasoning behind each decision.
 
 ## Quick start
 
-**Prerequisites:** Node.js ≥ 20, pnpm ≥ 9, Docker, Docker Compose (Python ≥ 3.11 only
+**Prerequisites:** Node.js ≥ 22, pnpm ≥ 9, Docker, Docker Compose (Python ≥ 3.11 only
 if you are working on the AI service).
 
 ```bash
@@ -133,7 +133,7 @@ cp apps/genAI/.env.example apps/genAI/.env   # AI keys are optional
 Then start everything:
 
 ```bash
-docker-compose up --build
+docker compose up --build
 ```
 
 The frontend comes up at **http://localhost:5173**.

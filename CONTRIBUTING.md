@@ -2,6 +2,10 @@
 
 Welcome! This guide will help you make your first contribution to the project.
 
+Use Node.js 22 or newer and pnpm 9 or newer. Docker Compose provides the
+PostgreSQL and Redis services used by the app; Redis carries live quiz messages
+and caches quiz state.
+
 ---
 
 ## 1. Fork the Repository
@@ -36,7 +40,7 @@ pnpm install
 
 *In `/packages/db` put it: -
 ```bash
-DATABASE_URL=postgresql://postgres:postgres@db:5432/mydb
+DATABASE_URL=postgresql://postgres:postgres@db:5432/Qtrive
 ```
 
 *and in `/apps/http-server` put it :-
@@ -63,6 +67,15 @@ cp apps/ws-server/.env.example apps/ws-server/.env
 
 Docker Compose passes `apps/http-server/.env` to ws-server directly, so a
 separate ws-server `.env` is not required when using `docker compose up`.
+
+For a local `pnpm run dev` outside Compose, `redis` and `db` are not valid
+hostnames. Start PostgreSQL 15 and Redis 7 locally (or run
+`docker compose up -d db redis`), then change the database URLs to
+`localhost:5432` in `packages/db/.env` and `apps/http-server/.env`. In
+`apps/ws-server/.env`, set the same local `DATABASE_URL`, `REDIS_HOST=localhost`,
+and `REDIS_PORT=6379`. If using Compose's Redis service, also set
+`REDIS_PASSWORD=thisistheredisPassword`; leave it unset for a local Redis
+installation with no password. See [setup.md](setup.md) for the full example.
 
 *Working on **live video**? `/apps/streaming` needs the same `JWT_SECRET` too:
 
@@ -96,7 +109,7 @@ TAVILY_API_KEY=<yourTavilyKey>
 
 ## 6. Start the Project
 ```bash
-docker-compose up --build
+docker compose up --build
 ```
 
 ## 7. Create a New Branch
@@ -163,7 +176,7 @@ pnpm run dev
 #### or with Docker
 
 ```bash
-docker-compose up
+docker compose up
 ```
 
 ## 11. Commit Changes
