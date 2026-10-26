@@ -5,6 +5,7 @@
   "main": "index.js",
   "scripts": {
     "build": "tsc -b",
+    "test": "vitest run",
     "dev": "tsc -b && node dist/index.js",
     "start": "node dist/index.js"
   },
@@ -38,6 +39,7 @@
     "ts-node-dev": "^2.0.0",
     "tsup": "^8.5.1",
     "typescript": "^6.0.2",
+    "vitest": "^5.0.2",
     "wait-on": "^9.0.4"
   }
 }
