@@ -122,6 +122,57 @@ describe('QuizBuilder AI integration', () => {
             )
         );
     });
+
+    async function fillManualQuestion(user: ReturnType<typeof renderBuilder>, secs: string) {
+        await screen.findByText('What is ATP?');
+        await user.click(screen.getByRole('button', { name: /add question/i }));
+        await user.type(screen.getByPlaceholderText('Add Question Here...'), 'Manual?');
+        for (const i of [1, 2, 3, 4]) {
+            await user.type(screen.getByPlaceholderText(`Answer ${i}`), `A${i}`);
+        }
+        await user.clear(screen.getByPlaceholderText('Secs'));
+        if (secs) await user.type(screen.getByPlaceholderText('Secs'), secs);
+        await user.click(screen.getByRole('button', { name: /save question/i }));
+    }
+
+    it.each(['-5', '0', '4', '301', '99999999999', '1.5', 'abc'])(
+        'does not send a question with %s seconds',
+        async (secs) => {
+            const user = renderBuilder();
+            await fillManualQuestion(user, secs);
+
+            expect(await screen.findByRole('alert')).toHaveTextContent(
+                'Seconds must be a whole number from 5 to 300'
+            );
+            expect(api.post).not.toHaveBeenCalled();
+        }
+    );
+
+    it('falls back to 15 seconds when the field is left empty', async () => {
+        const user = renderBuilder();
+        await fillManualQuestion(user, '');
+
+        await waitFor(() =>
+            expect(api.post).toHaveBeenCalledWith(
+                '/quizzes/quiz-1/questions',
+                expect.objectContaining({ timeLimit: 15 })
+            )
+        );
+    });
+
+    it('shows the server error in the form and keeps it open when saving fails', async () => {
+        vi.mocked(api.post).mockRejectedValueOnce({
+            response: { data: { error: 'timeLimit must be a whole number from 5 to 300' } },
+        });
+
+        const user = renderBuilder();
+        await fillManualQuestion(user, '20');
+
+        expect(await screen.findByRole('alert')).toHaveTextContent(
+            'timeLimit must be a whole number from 5 to 300'
+        );
+        expect(screen.getByPlaceholderText('Add Question Here...')).toHaveValue('Manual?');
+    });
 });
 
 describe('QuizBuilder question deletion', () => {
