@@ -18,6 +18,9 @@ import {
 
 const router: Router = Router();
 
+const HAND_COOLDOWN_MS = 1000;
+const handCooldowns = new Map<string, number>();
+
 /** Same error shape as http-server, so the frontend reads both the same way. */
 function errorResponse(res: Response, statusCode: number, message: string) {
     return res.status(statusCode).json({ success: false, error: message });
@@ -89,9 +92,21 @@ router.post('/sessions/:sessionId/hand', async (req: Request<{ sessionId: string
         return errorResponse(res, 403, 'Only players raise a hand.');
     }
 
+    const sessionId = req.params.sessionId;
+    const cooldownKey = `${sessionId}:${identityOf(caller)}`;
+    const now = Date.now();
+    const lastRequest = handCooldowns.get(cooldownKey);
+
+    if (lastRequest !== undefined && now - lastRequest < HAND_COOLDOWN_MS) {
+        return errorResponse(res, 429, 'Please wait before changing your hand again.');
+    }
+
+    // Record the request only after the cooldown check passes.
+    handCooldowns.set(cooldownKey, now);
+
     const raised = req.body?.raised === true;
 
-    await roomService.updateParticipant(roomName(req.params.sessionId), identityOf(caller), {
+    await roomService.updateParticipant(roomName(sessionId), identityOf(caller), {
         attributes: { hand: raised ? 'up' : '' },
     });
 
