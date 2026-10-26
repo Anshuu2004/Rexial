@@ -2,8 +2,8 @@ import { Request, Response } from 'express';
 import { errorResponse } from '../utils/error';
 import { prisma } from '@repo/db';
 import { generateCode } from '../utils/code';
-
-const DIFFICULTIES = ['Low', 'Medium', 'High'];
+import { parseCreateQuestion } from '../utils/questionInput';
+import { renumberQuestions } from '../utils/questionOrder';
 
 export const createQuizController = async (req: Request, res: Response) => {
     try {
@@ -224,11 +224,11 @@ export const generateAccessCodeController = async (req: Request, res: Response) 
 export const createQuestionController = async (req: Request, res: Response) => {
     try {
         const { quizId } = req.params;
-        const { text, timeLimit, answers, difficulty = "Medium" } = req.body;
 
-        if (!text || !timeLimit || !answers) return errorResponse(res, 400, "Text, time limit and answers are required")
+        const parsed = parseCreateQuestion(req.body);
+        if (!parsed.ok) return errorResponse(res, 400, parsed.error);
 
-        if (!DIFFICULTIES.includes(difficulty)) return errorResponse(res, 400, "Difficulty must be Low, Medium or High")
+        const { text, timeLimit, answers, difficulty } = parsed.data;
 
         const isOrganizer = await prisma.quizOrganizer.findFirst({
             where: {
@@ -240,30 +240,34 @@ export const createQuestionController = async (req: Request, res: Response) => {
 
         if (!isOrganizer) return errorResponse(res, 403, "You don't have access to this quiz");
 
-        const totalQuestions = await prisma.question.count({
-            where: {
-                quizId: quizId as string
-            }
-        });
+        // The quiz row is locked so two requests adding (or deleting) at the
+        // same time cannot both read the same max(order).
+        const question = await prisma.$transaction(async (tx) => {
+            await tx.$queryRaw`SELECT "id" FROM "Quiz" WHERE "id" = ${quizId as string} FOR UPDATE`;
 
+            const last = await tx.question.aggregate({
+                where: { quizId: quizId as string },
+                _max: { order: true }
+            });
 
-        const question = await prisma.question.create({
-            data: {
-                text,
-                timeLimit: timeLimit || 15,
-                order: totalQuestions + 1,
-                difficulty,
-                quizId: quizId as string,
-                answers: {
-                    create: answers.map((answer: any) => ({
-                        text: answer.text,
-                        isCorrect: answer.isCorrect
-                    }))
+            return tx.question.create({
+                data: {
+                    text,
+                    timeLimit,
+                    order: (last._max.order ?? 0) + 1,
+                    difficulty,
+                    quizId: quizId as string,
+                    answers: {
+                        create: answers.map((answer) => ({
+                            text: answer.text,
+                            isCorrect: answer.isCorrect
+                        }))
+                    }
+                },
+                include: {
+                    answers: true
                 }
-            },
-            include: {
-                answers: true
-            }
+            });
         });
 
         return res.status(201).json(question);
@@ -403,8 +407,23 @@ export const deleteQuestionController = async (req: Request, res: Response) => {
             return errorResponse(res, 403, "You don't have access to this quiz");
         }
 
-        await prisma.question.delete({
-            where: { id: questionId as string }
+        // Same quiz lock as createQuestionController, then close the gap so
+        // the orders stay 1..n and the next question does not tie with one.
+        await prisma.$transaction(async (tx) => {
+            await tx.$queryRaw`SELECT "id" FROM "Quiz" WHERE "id" = ${question.quizId} FOR UPDATE`;
+
+            await tx.question.delete({
+                where: { id: questionId as string }
+            });
+
+            const remaining = await tx.question.findMany({
+                where: { quizId: question.quizId },
+                select: { id: true, order: true }
+            });
+
+            for (const { id, order } of renumberQuestions(remaining)) {
+                await tx.question.update({ where: { id }, data: { order } });
+            }
         });
 
         return res.status(200).json({

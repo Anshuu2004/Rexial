@@ -12,6 +12,10 @@ import { DIFFICULTY_STYLES } from "../components/ai/difficulty"
 
 const DIFFICULTIES: Difficulty[] = ['Low', 'Medium', 'High'];
 
+// Same bounds the http-server enforces for a question's time limit.
+const MIN_TIME = 5;
+const MAX_TIME = 300;
+
 
 interface QuizQuestion {
   id: string;
@@ -39,6 +43,7 @@ function QuizBuilder() {
   const [qText, setQText] = useState('');
   const [qTime, setQTime] = useState('15');
   const [qDifficulty, setQDifficulty] = useState<Difficulty>('Medium');
+  const [saveError, setSaveError] = useState<string>('');
   const [answers, setAnswers] = useState([{ text: '', isCorrect: true }, { text: '', isCorrect: false }, { text: '', isCorrect: false }, { text: '', isCorrect: false }]);
 
   const [inviteEmail, setInviteEmail] = useState('');
@@ -154,10 +159,16 @@ function QuizBuilder() {
     if (!qText.trim() || answers.some(a => !a.text.trim())) return alert('Fill all text fields');
     if (!answers.some(a => a.isCorrect)) return alert('Select at least one correct answer');
 
+    const seconds = qTime.trim() === '' ? 15 : Number(qTime);
+    if (!Number.isInteger(seconds) || seconds < MIN_TIME || seconds > MAX_TIME) {
+      return setSaveError(`Seconds must be a whole number from ${MIN_TIME} to ${MAX_TIME}`);
+    }
+
     try {
+      setSaveError('');
       await api.post(`/quizzes/${id}/questions`, {
         text: qText,
-        timeLimit: parseInt(qTime) || 15,
+        timeLimit: seconds,
         difficulty: qDifficulty,
         answers
       });
@@ -167,8 +178,10 @@ function QuizBuilder() {
       setQDifficulty('Medium');
       setAnswers([{ text: '', isCorrect: true }, { text: '', isCorrect: false }, { text: '', isCorrect: false }, { text: '', isCorrect: false }]);
       fetchQuiz();
-    } catch (err) {
-      console.error(err);
+    } catch (err: unknown) {
+      console.error('Failed to save question', err);
+      const resp = (err as { response?: { data?: { error?: string } } }).response;
+      setSaveError(resp?.data?.error || 'Failed to save question');
     }
   };
 
@@ -339,8 +352,14 @@ function QuizBuilder() {
                 ))}
               </div>
 
+              {saveError && (
+                <p className="text-sm text-rose-400 mt-6 font-secondary font-medium" role="alert">
+                  {saveError}
+                </p>
+              )}
+
               <div className="mt-10 flex justify-end gap-5">
-                <button onClick={() => setShowAddQ(false)} className="px-6 py-2 text-zinc-400 hover:text-zinc-300 bg-rose-800/10 hover:bg-rose-800/20 rounded-xl border active:scale-95 border-rose-600/40 cursor-pointer">Cancel</button>
+                <button onClick={() => { setShowAddQ(false); setSaveError(''); }} className="px-6 py-2 text-zinc-400 hover:text-zinc-300 bg-rose-800/10 hover:bg-rose-800/20 rounded-xl border active:scale-95 border-rose-600/40 cursor-pointer">Cancel</button>
                 <button onClick={handleSaveQuestion} className="btn-primary flex items-center gap-2 bg-green-600/10 hover:bg-green-600/20 border border-green-600/30 active:scale-95 text-gray-300 cursor-pointer px-4 rounded-xl py-2"><BiSave className="w-4 h-4" /> Save Question</button>
               </div>
             </div>
