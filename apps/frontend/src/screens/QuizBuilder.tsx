@@ -128,9 +128,13 @@ function QuizBuilder() {
      
       setInviteMsg('Invite sent successfully!');
       setInviteEmail('');
+      // pull the new pending invite into the sidebar
+      fetchQuiz();
       setTimeout(() => setInviteMsg(''), 3000);
     } catch (err) {
-      setInviteMsg('Failed to invite.');
+      // the server says why it refused (already invited, bad email...)
+      const message = (err as { response?: { data?: { error?: string } } })?.response?.data?.error;
+      setInviteMsg(message || 'Failed to invite.');
       setInviteEmail('');
         setTimeout(() => setInviteMsg(''), 3000);
     }
@@ -447,10 +451,10 @@ function QuizBuilder() {
               <LuUserSearch className="w-5 h-5" /> Co-Organizers
             </h3>
             <div className="space-y-3 mb-6">
-              {quiz?.organizers?.map((org: any) => (
+              {quiz?.quizOrganizers?.map((org: any) => (
                 <div key={org.id} className="flex justify-between items-center text-sm">
                   <span className="truncate pr-2 text-gray-50">{org.user?.name || org.inviteEmail}</span>
-                  <span className="text-xs bg-white/10 px-2 py-0.5 rounded">{org.inviteStatus}</span>
+                  <span className="text-xs bg-white/10 px-2 py-0.5 rounded">{org.role === 'OWNER' ? 'OWNER' : org.inviteStatus}</span>
                 </div>
               ))}
             </div>

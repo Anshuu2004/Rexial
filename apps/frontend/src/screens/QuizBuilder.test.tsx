@@ -254,3 +254,55 @@ describe('QuizBuilder error states', () => {
         expect(api.post).toHaveBeenCalledWith('/quizzes/quiz-1/generate-access-code');
     });
 });
+
+
+describe('QuizBuilder co-organizers', () => {
+    it('lists the owner, accepted and pending organizers from quizOrganizers', async () => {
+        vi.mocked(api.get).mockResolvedValue({
+            data: {
+                ...quiz,
+                quizOrganizers: [
+                    { id: 'o1', role: 'OWNER', inviteStatus: 'ACCEPTED', inviteEmail: null, user: { name: 'Olivia Owner' } },
+                    { id: 'o2', role: 'CO_ORGANIZER', inviteStatus: 'ACCEPTED', inviteEmail: 'sam@example.com', user: { name: 'Sam' } },
+                    { id: 'o3', role: 'CO_ORGANIZER', inviteStatus: 'PENDING', inviteEmail: 'new@example.com', user: null },
+                ],
+            },
+        });
+
+        renderBuilder();
+
+        expect(await screen.findByText('Olivia Owner')).toBeInTheDocument();
+        expect(screen.getByText('OWNER')).toBeInTheDocument();
+        expect(screen.getByText('Sam')).toBeInTheDocument();
+        expect(screen.getByText('ACCEPTED')).toBeInTheDocument();
+        expect(screen.getByText('new@example.com')).toBeInTheDocument();
+        expect(screen.getByText('PENDING')).toBeInTheDocument();
+    });
+
+    it('shows the reason the server gave when an invite is refused', async () => {
+        vi.mocked(api.post).mockRejectedValueOnce({
+            response: { data: { success: false, error: 'Already invited' } },
+        });
+
+        const user = renderBuilder();
+        await screen.findByText('What is ATP?');
+
+        await user.type(screen.getByPlaceholderText('Email'), 'sam@example.com');
+        await user.click(screen.getByRole('button', { name: /send/i }));
+
+        expect(await screen.findByText('Already invited')).toBeInTheDocument();
+        expect(api.post).toHaveBeenCalledWith('/quizzes/quiz-1/invite', { email: 'sam@example.com' });
+    });
+
+    it('falls back to a generic message when the server gives no reason', async () => {
+        vi.mocked(api.post).mockRejectedValueOnce(new Error('network down'));
+
+        const user = renderBuilder();
+        await screen.findByText('What is ATP?');
+
+        await user.type(screen.getByPlaceholderText('Email'), 'sam@example.com');
+        await user.click(screen.getByRole('button', { name: /send/i }));
+
+        expect(await screen.findByText('Failed to invite.')).toBeInTheDocument();
+    });
+});

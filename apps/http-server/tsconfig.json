@@ -12,5 +12,6 @@
     "typeRoots": ["./node_modules/@types", "./src/types"]
   },
   "include": ["src"],
-  "exclude": ["node_modules", "dist"]
+  // Tests run through vitest and are not part of the shipped build.
+  "exclude": ["node_modules", "dist", "src/**/*.test.ts"]
 }
