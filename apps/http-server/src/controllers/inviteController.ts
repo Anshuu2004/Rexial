@@ -3,6 +3,10 @@ import { Response, Request } from "express"
 import { errorResponse } from "../utils/error";
 import { v4 as uuidv4 } from "uuid";
 import { sendInviteEmail } from "../utils/email";
+import { parseInviteEmail, sameEmail } from "../utils/inviteEmail";
+
+// Prisma's unique constraint error, e.g. two requests racing past the checks below
+const isUniqueViolation = (error: unknown) => (error as { code?: string })?.code === 'P2002';
 
 export const inviteCoOrganizerController = async (req: Request, res: Response) => {
     try {
@@ -10,7 +14,9 @@ export const inviteCoOrganizerController = async (req: Request, res: Response) =
         console.log("API hit ho rhi hai bhai....")
 
         const quizId = req.params.quizId;
-        const { email } = req.body;
+        const parsed = parseInviteEmail(req.body?.email);
+        if ('error' in parsed) return errorResponse(res, 400, parsed.error);
+        const { email } = parsed;
 
         const quiz = await prisma.quiz.findUnique({
             where: {
@@ -23,11 +29,28 @@ export const inviteCoOrganizerController = async (req: Request, res: Response) =
 
         if (quiz.creatorId !== req.userId) return errorResponse(res, 403, 'Only Owner can invite...');
 
-        const targetUser = await prisma.user.findUnique({
+        // emails are matched case-insensitively, older rows may not be lower case
+        const targetUser = await prisma.user.findFirst({
             where: {
-                email
+                email: { equals: email, mode: 'insensitive' }
             }
         });
+
+        if (targetUser && targetUser.id === quiz.creatorId) return errorResponse(res, 409, 'You cannot invite yourself');
+
+        const existing = await prisma.quizOrganizer.findFirst({
+            where: {
+                quizId: quizId as string,
+                OR: [
+                    ...(targetUser ? [{ userId: targetUser.id }] : []),
+                    { inviteEmail: { equals: email, mode: 'insensitive' as const } }
+                ]
+            }
+        });
+
+        if (existing) {
+            return errorResponse(res, 409, existing.inviteStatus === 'ACCEPTED' ? 'Already an organizer' : 'Already invited');
+        }
 
         const inviteToken = uuidv4();
 
@@ -59,6 +82,7 @@ export const inviteCoOrganizerController = async (req: Request, res: Response) =
         })
 
     } catch (error) {
+        if (isUniqueViolation(error)) return errorResponse(res, 409, 'Already invited');
         console.log('Error while sending mail...', error);
         return errorResponse(res, 500, 'Internal Server Error');
     }
@@ -84,7 +108,22 @@ export const acceptInvitationController = async (req: Request, res: Response) =>
             },
         });
 
-        if (invite.inviteEmail && invite.inviteEmail !== user?.email) return errorResponse(res, 400, 'Email is not matching. Try again later');
+        if (invite.inviteEmail && !sameEmail(invite.inviteEmail, user?.email)) return errorResponse(res, 400, 'Email is not matching. Try again later');
+
+        // already an organizer of this quiz through another row (e.g. an older duplicate invite),
+        // so linking this one would break the unique (userId, quizId) constraint
+        const alreadyOrganizer = await prisma.quizOrganizer.findFirst({
+            where: {
+                quizId: invite.quizId,
+                userId: req.userId,
+                id: { not: invite.id }
+            }
+        });
+
+        if (alreadyOrganizer) {
+            await prisma.quizOrganizer.delete({ where: { id: invite.id } });
+            return errorResponse(res, 409, 'You are already an organizer of this quiz');
+        }
 
         await prisma.quizOrganizer.update({
             where: { id: invite.id },
@@ -100,6 +139,7 @@ export const acceptInvitationController = async (req: Request, res: Response) =>
         })
 
     } catch (error) {
+        if (isUniqueViolation(error)) return errorResponse(res, 409, 'You are already an organizer of this quiz');
         console.log("eror while accepting the invitation", error);
         return errorResponse(res, 500, 'Internal Server Error...')
     }
