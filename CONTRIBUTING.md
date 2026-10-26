@@ -54,6 +54,10 @@ DATABASE_URL=postgresql://postgres:postgres@db:5432/Qtrive
 
 FRONTEND_URL=http://localhost:5173
 
+# Comma-separated origins the browser may call the API from.
+# Optional, this is the default.
+CORS_ORIGIN=http://localhost:5173
+
 ```
 
 *When running `/apps/ws-server` outside Docker*, copy `.env.example` and put

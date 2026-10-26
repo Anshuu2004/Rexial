@@ -11,8 +11,15 @@ import { requestLogger } from './middlewares/requestLogger'
 
 const app: Express = express()
 
+// Comma-separated list, same as apps/streaming. Production sets this to the
+// real site in .env.prod.
+const corsOrigins = (process.env.CORS_ORIGIN || 'http://localhost:5173')
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean)
+
 app.use(cors({
-    origin: 'https://rexial.in',
+    origin: corsOrigins,
     credentials: true
 }))
 app.use(requestLogger)
