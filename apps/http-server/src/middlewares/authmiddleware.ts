@@ -19,10 +19,16 @@ export const authMiddleware = async (req: Request, res: Response, next: NextFunc
         if (!token) return errorResponse(res, 401, "You're not authorized...")
 
         const decoded = jwt.verify(token, process.env.JWT_SECRET || "secret") as { userId: string }
+
+        if (!decoded.userId) return errorResponse(res, 401, "You're not authorized...")
+
         req.userId = decoded.userId;
         next();
 
     } catch (error) {
+        // Expired, malformed or badly signed token: the client needs a 401 to log the user out.
+        if (error instanceof jwt.JsonWebTokenError) return errorResponse(res, 401, "You're not authorized...")
+
         console.log("Error in authentication", error);
         return errorResponse(res, 500, "Internal Server Error...")
     }
