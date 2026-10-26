@@ -1,7 +1,7 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import jwt from "jsonwebtoken";
-import type { AddressInfo } from "node:net";
 import type { Server } from "node:http";
+import type { AddressInfo } from "node:net";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => {
     process.env.JWT_SECRET = "test-secret";
@@ -59,7 +59,14 @@ afterAll(() => {
     server.close();
 });
 
+let fakeNow = Date.now();
+
 beforeEach(() => {
+    vi.restoreAllMocks();
+
+    fakeNow += 2000;
+    vi.spyOn(Date, "now").mockImplementation(() => fakeNow);
+
     vi.clearAllMocks();
 
     mocks.prisma.quizSession.findUnique.mockResolvedValue({ status: "WAITING", liveVideo: true });
@@ -203,6 +210,50 @@ describe("joining the video room", () => {
 });
 
 describe("raising a hand", () => {
+    it("rejects rapid repeated hand changes", async () => {
+        const first = await call(
+            "POST",
+            `/sessions/${SESSION}/hand`,
+            playerToken(),
+            { raised: true },
+        );
+
+        expect(first.status).toBe(200);
+
+        const second = await call(
+            "POST",
+            `/sessions/${SESSION}/hand`,
+            playerToken(),
+            { raised: false },
+        );
+
+        expect(second.status).toBe(429);
+        expect(mocks.updateParticipant).toHaveBeenCalledTimes(1);
+    });
+
+    it("allows another hand change after the cooldown", async () => {
+        const first = await call(
+            "POST",
+            `/sessions/${SESSION}/hand`,
+            playerToken(),
+            { raised: true },
+        );
+
+        expect(first.status).toBe(200);
+
+        fakeNow += 1001;
+
+        const second = await call(
+            "POST",
+            `/sessions/${SESSION}/hand`,
+            playerToken(),
+            { raised: false },
+        );
+
+        expect(second.status).toBe(200);
+        expect(mocks.updateParticipant).toHaveBeenCalledTimes(2);
+    });
+
     it("is written on the player's own participant", async () => {
         const res = await call("POST", `/sessions/${SESSION}/hand`, playerToken(), { raised: true });
         expect(res.status).toBe(200);

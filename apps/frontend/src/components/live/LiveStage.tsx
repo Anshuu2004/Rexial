@@ -523,6 +523,7 @@ function PlayerControls({ sessionId, authToken }: { sessionId: string; authToken
   const permissions = useLocalParticipantPermissions();
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
+  const [cooldown, setCooldown] = useState(false);
 
   const handUp = localParticipant.attributes.hand === 'up';
   const maySpeak = Boolean(permissions?.canPublish);
@@ -561,13 +562,24 @@ function PlayerControls({ sessionId, authToken }: { sessionId: string; authToken
           </button>
         </>
       ) : (
-        <button
-          disabled={busy}
-          className={`${controlClass(handUp)} w-full`}
-          onClick={() => run(() => setHandRaised(sessionId, authToken, !handUp), "Couldn't reach the host.")}
-        >
-          <FaHand /> {handUp ? 'Lower hand' : 'Raise hand'}
-        </button>
+          <button
+            disabled={busy || cooldown}
+            className={`${controlClass(handUp)} w-full`}
+            onClick={() => {
+              setCooldown(true);
+
+              void run(
+                () => setHandRaised(sessionId, authToken, !handUp),
+                "Couldn't reach the host.",
+              );
+
+              window.setTimeout(() => {
+                setCooldown(false);
+              }, 1000);
+            }}
+          >
+            <FaHand /> {cooldown ? 'Please wait…' : handUp ? 'Lower hand' : 'Raise hand'}
+          </button>
       )}
       {problem && <p role="alert" className="text-[11px] sm:text-xs text-rose-300 font-secondary">{problem}</p>}
     </div>
