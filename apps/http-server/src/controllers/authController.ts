@@ -4,13 +4,18 @@ import { prisma } from "@repo/db"
 import bcrypt from 'bcrypt'
 import jwt from "jsonwebtoken"
 import { errorResponse } from "../utils/error"
+import { parseRegisterInput } from "../utils/registerInput"
 
 
 export const userRegisterController = async (req: Request, res: Response) => {
 
     try {
 
-        const { name, email, password } = req.body;
+        // Nothing below runs (findUnique, bcrypt) until all three fields are real strings.
+        const parsed = parseRegisterInput(req.body);
+        if (!parsed.ok) return errorResponse(res, 400, parsed.error);
+
+        const { name, email, password } = parsed.data;
 
 
         // is user existed already
