@@ -315,7 +315,7 @@ describe('LiveStage host view and moderation', () => {
     const { user } = renderStage({ isOrganizer: true });
     await screen.findByTestId('livekit-room');
 
-    expect(screen.getByText(/speaking/i)).toBeInTheDocument();
+    expect(screen.getByText('Speaking')).toBeInTheDocument();
     expect(screen.getByText('Bob')).toBeInTheDocument();
 
     const muteBtn = screen.getByRole('button', { name: /mute bob/i });

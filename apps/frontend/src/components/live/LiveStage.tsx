@@ -1,5 +1,4 @@
-import { useEffect, useState } from 'react';
-import type { ReactNode } from 'react';
+import type { TrackReferenceOrPlaceholder } from '@livekit/components-react';
 import {
   LiveKitRoom,
   RoomAudioRenderer,
@@ -11,23 +10,25 @@ import {
   useParticipants,
   useTracks,
 } from '@livekit/components-react';
-import type { TrackReferenceOrPlaceholder } from '@livekit/components-react';
-import { DisconnectReason, RoomEvent, Track } from 'livekit-client';
 import type { Participant } from 'livekit-client';
+import { DisconnectReason, RoomEvent, Track } from 'livekit-client';
+import type { ReactNode } from 'react';
+import { useEffect, useState } from 'react';
 import { BsCameraVideo, BsCameraVideoOff, BsMic, BsMicMute } from 'react-icons/bs';
-import { MdScreenShare, MdStopScreenShare } from 'react-icons/md';
 import { FaHand } from 'react-icons/fa6';
 import { LuChevronDown, LuMaximize2, LuMinimize2 } from 'react-icons/lu';
-import { getAvatar, getAvatarColor } from '../../utils/Avatars';
+import { MdScreenShare, MdStopScreenShare } from 'react-icons/md';
+import type { RoomAccess } from '../../services/streamApi';
 import {
   allowToSpeak,
   endVideo,
   fetchRoomAccess,
+  muteAllSpeakers,
   setHandRaised,
   stopSpeaking,
   streamError,
 } from '../../services/streamApi';
-import type { RoomAccess } from '../../services/streamApi';
+import { getAvatar, getAvatarColor } from '../../utils/Avatars';
 
 interface LiveStageProps {
   sessionId: string;
@@ -245,6 +246,24 @@ function Stage({ sessionId, isOrganizer, authToken, quizEnded }: StageProps) {
         ) : (
           <p className="text-[11px] sm:text-xs text-zinc-500 font-secondary tracking-wide">{watching}</p>
         )}
+
+        <div className="flex items-center justify-between gap-2">
+          <p
+            className="text-[11px] sm:text-xs text-zinc-400 font-secondary"
+            aria-live="polite"
+          >
+            {speakers.length} of 3 speaking
+          </p>
+
+          {isOrganizer && speakers.length > 0 && (
+            <HostAction
+              label="Mute all speakers"
+              onClick={() => muteAllSpeakers(sessionId, authToken)}
+            >
+              Mute All
+            </HostAction>
+          )}
+        </div>
 
         {/* The roster already lists hands and speakers first, with the same
             buttons, so the short lists give way to it while it is open. */}

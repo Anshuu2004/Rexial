@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => {
         },
         createRoom: vi.fn(),
         updateParticipant: vi.fn(),
+        listParticipants: vi.fn(),
         listRooms: vi.fn(),
         deleteRoom: vi.fn(),
     };
@@ -29,6 +30,7 @@ vi.mock("livekit-server-sdk", async (importOriginal) => {
     class RoomServiceClient {
         createRoom = mocks.createRoom;
         updateParticipant = mocks.updateParticipant;
+        listParticipants = mocks.listParticipants;
         listRooms = mocks.listRooms;
         deleteRoom = mocks.deleteRoom;
     }
@@ -76,6 +78,7 @@ beforeEach(() => {
     );
     mocks.createRoom.mockResolvedValue({});
     mocks.updateParticipant.mockResolvedValue({});
+    mocks.listParticipants.mockResolvedValue([]);
     mocks.listRooms.mockResolvedValue([]);
     mocks.deleteRoom.mockResolvedValue(undefined);
 });
@@ -286,6 +289,68 @@ describe("raising a hand", () => {
 });
 
 describe("letting a player speak", () => {
+    it("rejects a fourth speaker when three are already speaking", async () => {
+        mocks.listParticipants.mockResolvedValue([
+            { identity: "player-p-1", attributes: { speaker: "yes" } },
+            { identity: "player-p-2", attributes: { speaker: "yes" } },
+            { identity: "player-p-3", attributes: { speaker: "yes" } },
+            { identity: "player-p-4", attributes: { speaker: "" } },
+        ]);
+
+        const res = await call("PUT", `/sessions/${SESSION}/speakers/p-4`, hostToken());
+
+        expect(res.status).toBe(409);
+        const body = await res.json();
+        expect(body.error).toContain("Maximum of 3 players can speak at once");
+        expect(mocks.updateParticipant).not.toHaveBeenCalled();
+    });
+
+    it("allows an existing speaker to be granted permission again at capacity", async () => {
+        mocks.listParticipants.mockResolvedValue([
+            { identity: "player-p-1", attributes: { speaker: "yes" } },
+            { identity: "player-p-2", attributes: { speaker: "yes" } },
+            { identity: "player-p-3", attributes: { speaker: "yes" } },
+        ]);
+
+        const res = await call("PUT", `/sessions/${SESSION}/speakers/p-1`, hostToken());
+
+        expect(res.status).toBe(200);
+        const body = await res.json();
+        expect(body.speakingCount).toBe(3);
+        expect(mocks.updateParticipant).toHaveBeenCalledTimes(1);
+    });
+
+    it("mutes all current speakers when the host requests it", async () => {
+        mocks.listParticipants.mockResolvedValue([
+            { identity: "player-p-1", attributes: { speaker: "yes" } },
+            { identity: "player-p-2", attributes: { speaker: "yes" } },
+            { identity: "player-p-3", attributes: { speaker: "yes" } },
+            { identity: "player-p-4", attributes: { speaker: "" } },
+        ]);
+
+        const res = await call("DELETE", `/sessions/${SESSION}/speakers`, hostToken());
+
+        expect(res.status).toBe(200);
+        const body = await res.json();
+        expect(body.mutedCount).toBe(3);
+        expect(mocks.updateParticipant).toHaveBeenCalledTimes(3);
+
+        for (const [room, identity, options] of mocks.updateParticipant.mock.calls) {
+            expect(room).toBe(`quiz-${SESSION}`);
+            expect(["player-p-1", "player-p-2", "player-p-3"]).toContain(identity);
+            expect(options.attributes).toEqual({ speaker: "" });
+            expect(options.permission).toMatchObject({ canPublish: false });
+        }
+    });
+
+    it("refuses to let a player mute everyone", async () => {
+        const res = await call("DELETE", `/sessions/${SESSION}/speakers`, playerToken());
+
+        expect(res.status).toBe(403);
+        expect(mocks.listParticipants).not.toHaveBeenCalled();
+        expect(mocks.updateParticipant).not.toHaveBeenCalled();
+    });
+
     it("is refused to a player, even for themselves", async () => {
         const res = await call("PUT", `/sessions/${SESSION}/speakers/p-1`, playerToken());
         expect(res.status).toBe(403);

@@ -10,6 +10,9 @@ import type { Caller } from './auth.js';
  */
 export const MAX_LIVE_VIDEO_PARTICIPANTS = 300;
 
+/** Maximum number of players allowed to speak at the same time. */
+export const MAX_SIMULTANEOUS_SPEAKERS = 3;
+
 /** Seats on top of the players, for the host and co-hosts. */
 const HOST_SEATS = 20;
 
