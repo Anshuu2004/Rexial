@@ -13,7 +13,8 @@
     "db:generate:prod": "prisma generate",
     "db:migrate": "prisma migrate deploy", 
     "db:reset": "prisma migrate reset",
-    "db:push": "prisma db push"
+    "db:push": "prisma db push",
+    "check-types": "tsc --noEmit"
   },
   "keywords": [],
   "author": "",
