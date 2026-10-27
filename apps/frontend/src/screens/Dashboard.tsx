@@ -301,7 +301,7 @@ function Dashboard() {
                   onChange={(e) => setNewTitle(e.target.value)}
                 />
                 <textarea
-                  placeholder="Description (optional)"
+                  placeholder="Description"
                   className="input-field mb-6 resize-none h-24 text-gray-300 font-bold font-secondary tracking-wider border border-pink-900 outline-none sm:w-96 min-w-60 m-auto py-2 px-4 rounded-xl"
                   value={newDescription}
                   onChange={(e) => setNewDescription(e.target.value)}
