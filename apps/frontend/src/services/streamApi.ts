@@ -46,6 +46,11 @@ export async function stopSpeaking(sessionId: string, authToken: string, partici
     await streamApi.delete(`/sessions/${sessionId}/speakers/${participantId}`, auth(authToken));
 }
 
+/** Mute every current speaker in the session. Host only. */
+export async function muteAllSpeakers(sessionId: string, authToken: string) {
+    await streamApi.delete(`/sessions/${sessionId}/speakers`, auth(authToken));
+}
+
 /** Close the session's video room for everyone. Host only. */
 export async function endVideo(sessionId: string, authToken: string) {
     await streamApi.delete(`/sessions/${sessionId}/room`, auth(authToken));

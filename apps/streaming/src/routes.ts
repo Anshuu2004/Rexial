@@ -6,6 +6,7 @@ import type { Caller } from './auth.js';
 import { config } from './config.js';
 import {
     LISTENER_PERMISSION,
+    MAX_SIMULTANEOUS_SPEAKERS,
     SPEAKER_PERMISSION,
     closeRoom,
     createJoinToken,
@@ -116,7 +117,8 @@ router.post('/sessions/:sessionId/hand', async (req: Request<{ sessionId: string
 
 type SpeakerParams = { sessionId: string; participantId: string };
 
-/** Give a player the floor: they may now turn their microphone on. */
+
+/** Give a player the floor, provided the simultaneous-speaker limit allows it. */
 router.put('/sessions/:sessionId/speakers/:participantId', async (req: Request<SpeakerParams>, res) => {
     const caller = await requireCaller(req, res);
     if (!caller) return;
@@ -125,13 +127,74 @@ router.put('/sessions/:sessionId/speakers/:participantId', async (req: Request<S
         return errorResponse(res, 403, 'Only the host can let a player speak.');
     }
 
-    await roomService.updateParticipant(roomName(req.params.sessionId), playerIdentity(req.params.participantId), {
+    const sessionId = req.params.sessionId;
+    const targetIdentity = playerIdentity(req.params.participantId);
+    const participants = await roomService.listParticipants(roomName(sessionId));
+
+    const alreadySpeaking = participants.some(
+        (participant) =>
+            participant.identity === targetIdentity &&
+            participant.attributes?.speaker === 'yes',
+    );
+
+    const speakerCount = participants.filter(
+        (participant) => participant.attributes?.speaker === 'yes',
+    ).length;
+
+    if (!alreadySpeaking && speakerCount >= MAX_SIMULTANEOUS_SPEAKERS) {
+        return errorResponse(
+            res,
+            409,
+            `Maximum of ${MAX_SIMULTANEOUS_SPEAKERS} players can speak at once. Mute a current speaker before adding another.`,
+        );
+    }
+
+    await roomService.updateParticipant(roomName(sessionId), targetIdentity, {
         permission: SPEAKER_PERMISSION,
-        // Being heard answers the raised hand.
         attributes: { speaker: 'yes', hand: '' },
     });
 
-    return res.status(200).json({ speaking: true });
+    return res.status(200).json({
+        speaking: true,
+        speakingCount: alreadySpeaking ? speakerCount : speakerCount + 1,
+        maxSpeakers: MAX_SIMULTANEOUS_SPEAKERS,
+    });
+
+});
+
+
+/** Mute every player currently marked as a speaker. */
+router.delete('/sessions/:sessionId/speakers', async (req: Request<{ sessionId: string }>, res) => {
+    const caller = await requireCaller(req, res);
+    if (!caller) return;
+
+    if (caller.kind !== 'organizer') {
+        return errorResponse(res, 403, 'Only the host can mute all players.');
+    }
+
+    const sessionId = req.params.sessionId;
+    const room = roomName(sessionId);
+    const participants = await roomService.listParticipants(room);
+
+    const speakers = participants.filter(
+        (participant) => participant.attributes?.speaker === 'yes',
+    );
+
+    await Promise.all(
+        speakers.map((participant) =>
+            roomService.updateParticipant(room, participant.identity, {
+                permission: LISTENER_PERMISSION,
+                attributes: { speaker: '' },
+            }),
+        ),
+    );
+
+    return res.status(200).json({
+        success: true,
+        mutedCount: speakers.length,
+        speakingCount: 0,
+        maxSpeakers: MAX_SIMULTANEOUS_SPEAKERS,
+    });
 });
 
 
