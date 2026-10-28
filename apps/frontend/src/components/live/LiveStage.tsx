@@ -259,6 +259,7 @@ function Stage({ sessionId, isOrganizer, authToken, quizEnded }: StageProps) {
             <HostAction
               label="Mute all speakers"
               onClick={() => muteAllSpeakers(sessionId, authToken)}
+              failureMessage="Couldn't mute all speakers."
             >
               Mute All
             </HostAction>
@@ -396,7 +397,7 @@ function HostRowActions({ participant: p, sessionId, authToken }: { participant:
     return (
       <>
         <MicState participant={p} />
-        <HostAction label={`Mute ${p.name}`} onClick={() => stopSpeaking(sessionId, authToken, participantId)}>
+        <HostAction label={`Mute ${p.name}`} onClick={() => stopSpeaking(sessionId, authToken, participantId)} failureMessage="Couldn't mute this participant.">
           Mute
         </HostAction>
       </>
@@ -406,7 +407,7 @@ function HostRowActions({ participant: p, sessionId, authToken }: { participant:
   return (
     <>
       {p.attributes.hand === 'up' && <FaHand className="shrink-0 text-amber-400" aria-label="Hand raised" />}
-      <HostAction label={`Let ${p.name} speak`} onClick={() => allowToSpeak(sessionId, authToken, participantId)}>
+      <HostAction label={`Let ${p.name} speak`} onClick={() => allowToSpeak(sessionId, authToken, participantId)} failureMessage="Couldn't allow this participant to speak.">
         Let speak
       </HostAction>
     </>
@@ -439,27 +440,49 @@ function PlayerRow({ participant, children }: { participant: Participant; childr
 }
 
 /** A host's button on one player's row; `label` names the player for screen readers. */
-function HostAction({ label, onClick, children }: { label: string; onClick: () => Promise<void>; children: ReactNode }) {
+function HostAction({
+  label,
+  onClick,
+  children,
+  failureMessage,
+}: {
+  label: string;
+  onClick: () => Promise<void>;
+  children: ReactNode;
+  failureMessage: string;
+}) {
   const [busy, setBusy] = useState(false);
+  const [problem, setProblem] = useState<string | null>(null);
 
   return (
-    <button
-      aria-label={label}
-      disabled={busy}
-      onClick={async () => {
-        setBusy(true);
-        try {
-          await onClick();
-        } catch (err) {
-          console.error('[live] host action failed', err);
-        } finally {
-          setBusy(false);
-        }
-      }}
-      className="shrink-0 px-2 py-0.5 rounded-md border border-pink-600/50 text-pink-300 hover:bg-pink-600/20 text-[11px] sm:text-xs cursor-pointer disabled:opacity-50"
-    >
-      {children}
-    </button>
+    <span className="inline-flex flex-wrap items-center gap-2">
+      <button
+        aria-label={label}
+        disabled={busy}
+        onClick={async () => {
+          setBusy(true);
+          setProblem(null);
+
+          try {
+            await onClick();
+          } catch (err) {
+            console.error("[live] host action failed", err);
+            setProblem(streamError(err, failureMessage));
+          } finally {
+            setBusy(false);
+          }
+        }}
+        className="shrink-0 px-2 py-0.5 rounded-md border border-pink-600/50 text-pink-300 hover:bg-pink-600/20 text-[11px] sm:text-xs cursor-pointer disabled:opacity-50"
+      >
+        {children}
+      </button>
+
+      {problem && (
+        <span role="alert" className="text-[11px] text-rose-300">
+          {problem}
+        </span>
+      )}
+    </span>
   );
 }
 
