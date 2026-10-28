@@ -436,3 +436,108 @@ export const deleteQuestionController = async (req: Request, res: Response) => {
         return errorResponse(res, 500, "Internal Server Error");
     }
 }
+
+
+
+
+export const updateQuestionController = async (
+    req: Request,
+    res: Response
+) => {
+    try {
+        const userId = req.userId;
+        const quizId = req.params.quizId as string;
+        const questionId = req.params.questionId as string;
+
+        if (!userId) {
+            return errorResponse(res, 401, "Unauthorized");
+        }
+
+        if (!questionId || !questionId.trim()) {
+            return errorResponse(res, 400, "Question ID is required");
+        }
+
+        const parsedData = parseCreateQuestion(req.body);
+        if (!parsedData.ok) {
+            return errorResponse(res, 400, parsedData.error);
+        }
+
+        const { text, timeLimit, answers, difficulty } = parsedData.data;
+
+        const question = await prisma.question.findUnique({
+            where: {
+                id: questionId
+            },
+            include: {
+                quiz: {
+                    include: {
+                        quizOrganizers: {
+                            where: {
+                                userId,
+                                inviteStatus: "ACCEPTED"
+                            }
+                        }
+                    }
+                }
+            }
+        });
+
+        if (!question) {
+            return errorResponse(res, 404, "Question not found");
+        }
+
+        if (question.quizId !== quizId) {
+            return errorResponse(res, 404, "Question not found in this quiz");
+        }
+
+        const isOrganizer = question.quiz.quizOrganizers.length > 0;
+        const isCreator = question.quiz.creatorId === userId;
+
+        if (!isOrganizer && !isCreator) {
+            return errorResponse(res, 403, "You don't have access to this quiz");
+        }
+
+        const updatedQuestion = await prisma.$transaction(async (tx) => {
+            await tx.$queryRaw`SELECT "id" FROM "Quiz" WHERE "id" = ${question.quizId} FOR UPDATE`;
+
+await tx.question.update({
+    where: {
+        id: question.id
+    },
+    data: {
+        text,
+        timeLimit,
+        difficulty
+    }
+});
+
+await tx.answer.deleteMany({
+    where: {
+        questionId: question.id
+    }
+});
+
+await tx.answer.createMany({
+    data: answers.map((answer) => ({
+        questionId: question.id,
+        text: answer.text,
+        isCorrect: answer.isCorrect
+    }))
+});
+
+return await tx.question.findUnique({
+    where: {
+        id: question.id
+    },
+    include: {
+        answers: true
+    }
+});
+        });
+
+        return res.status(200).json(updatedQuestion);
+    } catch (error) {
+        console.log("Update question error: ", error);
+        return errorResponse(res, 500, "Internal Server Error");
+    }
+};

@@ -9,6 +9,7 @@ import { LuUserSearch } from "react-icons/lu"
 import AiQuizGenerator from "../components/AiQuizGenerator"
 import type { Difficulty, GeneratedQuestion } from "../services/genaiApi"
 import { DIFFICULTY_STYLES } from "../components/ai/difficulty"
+import { BsPencil } from "react-icons/bs";
 
 const DIFFICULTIES: Difficulty[] = ['Low', 'Medium', 'High'];
 
@@ -55,6 +56,10 @@ function QuizBuilder() {
 
   const [loadError, setLoadError] = useState<string | null>(null);
   const [codeError, setCodeError] = useState<string | null>(null);
+  const [editingQuestion, setEditingQuestion] =
+    useState<QuizQuestion | null>(null);
+    const [editingQuestionId, setEditingQuestionId] =
+  useState<string | null>(null);
 
 
 
@@ -155,36 +160,80 @@ function QuizBuilder() {
   };
 
 
-  const handleSaveQuestion = async () => {
-    if (!qText.trim() || answers.some(a => !a.text.trim())) return alert('Fill all text fields');
-    if (!answers.some(a => a.isCorrect)) return alert('Select at least one correct answer');
+const handleSaveQuestion = async () => {
+  if (!qText.trim() || answers.some((a) => !a.text.trim())) {
+    return alert("Fill all text fields");
+  }
 
-    const seconds = qTime.trim() === '' ? 15 : Number(qTime);
-    if (!Number.isInteger(seconds) || seconds < MIN_TIME || seconds > MAX_TIME) {
-      return setSaveError(`Seconds must be a whole number from ${MIN_TIME} to ${MAX_TIME}`);
+  if (!answers.some((a) => a.isCorrect)) {
+    return alert("Select at least one correct answer");
+  }
+
+  const seconds = qTime.trim() === "" ? 15 : Number(qTime);
+
+  if (
+    !Number.isInteger(seconds) ||
+    seconds < MIN_TIME ||
+    seconds > MAX_TIME
+  ) {
+    return setSaveError(
+      `Seconds must be a whole number from ${MIN_TIME} to ${MAX_TIME}`
+    );
+  }
+
+  try {
+    setSaveError("");
+
+    const payload = {
+      text: qText,
+      timeLimit: seconds,
+      difficulty: qDifficulty,
+      answers,
+    };
+
+    if (editingQuestion) {
+      // UPDATE EXISTING QUESTION
+      await api.put(
+        `/quizzes/${id}/questions/${editingQuestion.id}`,
+        payload
+      );
+    } else {
+      // CREATE NEW QUESTION
+      await api.post(
+        `/quizzes/${id}/questions`,
+        payload
+      );
     }
 
-    try {
-      setSaveError('');
-      await api.post(`/quizzes/${id}/questions`, {
-        text: qText,
-        timeLimit: seconds,
-        difficulty: qDifficulty,
-        answers
-      });
-      setShowAddQ(false);
-      setQText('');
-      setQTime('15');
-      setQDifficulty('Medium');
-      setAnswers([{ text: '', isCorrect: true }, { text: '', isCorrect: false }, { text: '', isCorrect: false }, { text: '', isCorrect: false }]);
-      fetchQuiz();
-    } catch (err: unknown) {
-      console.error('Failed to save question', err);
-      const resp = (err as { response?: { data?: { error?: string } } }).response;
-      setSaveError(resp?.data?.error || 'Failed to save question');
-    }
-  };
+    // Reset form
+    setEditingQuestion(null);
+    setEditingQuestionId(null);
+    setShowAddQ(false);
+    setQText("");
+    setQTime("15");
+    setQDifficulty("Medium");
+    setAnswers([
+      { text: "", isCorrect: true },
+      { text: "", isCorrect: false },
+      { text: "", isCorrect: false },
+      { text: "", isCorrect: false },
+    ]);
 
+    fetchQuiz();
+  } catch (err: unknown) {
+    console.error(err);
+
+    const resp = (err as {
+      response?: {
+        data?: {
+          error?: string;
+        };
+      };
+    }).response;
+
+    setSaveError(resp?.data?.error || "Failed to save question");
+  }
+};
   const handleDeleteQuestion = async () => {
     if (!questionToDelete || deleting) return;
     try {
@@ -211,6 +260,15 @@ function QuizBuilder() {
     }
   };
 
+   const handleEditQuestion = (q: QuizQuestion) => {
+    setEditingQuestion(q);
+
+    setQText(q.text);
+    setQTime(String(q.timeLimit));
+    setQDifficulty(q.difficulty ?? "Medium");
+    setAnswers(q.answers);
+    setShowAddQ(true);
+};
 
   return (
     <div className="min-h-screen w-full bg-[#000000]/98 opacity-99">
@@ -283,7 +341,22 @@ function QuizBuilder() {
               <button onClick={() => { setShowAiGen(!showAiGen); setShowAddQ(false); }} className="flex items-center gap-2 py-2.5 px-4 rounded-full bg-purple-600/30 hover:bg-purple-600/40 active:scale-90 border border-purple-700 cursor-pointer text-purple-400 font-secondary tracking-wider font-extrabold transition duration-100">
                 <BsStars className="w-4 h-4" /> Generate with AI
               </button>
-              <button onClick={() => { setShowAddQ(!showAddQ); setShowAiGen(false); }} className="flex items-center gap-2 py-2.5 px-4 rounded-full bg-pink-600/30 hover:bg-pink-600/40 active:scale-90 border border-pink-700 cursor-pointer text-pink-500 font-secondary tracking-wider font-extrabold transition duration-100">
+              <button onClick={() => {
+    setEditingQuestion(null);
+   setEditingQuestionId(null);
+    setQText("");
+    setQTime("15");
+    setQDifficulty("Medium");
+    setAnswers([
+        { text: "", isCorrect: true },
+        { text: "", isCorrect: false },
+        { text: "", isCorrect: false },
+        { text: "", isCorrect: false },
+    ]);
+
+    setShowAddQ(true);
+    setShowAiGen(false);
+}}className="flex items-center gap-2 py-2.5 px-4 rounded-full bg-pink-600/30 hover:bg-pink-600/40 active:scale-90 border border-pink-700 cursor-pointer text-pink-500 font-secondary tracking-wider font-extrabold transition duration-100">
                 <BiPlus className="w-4 h-4" /> Add Question
               </button>
             </div>
@@ -360,7 +433,7 @@ function QuizBuilder() {
 
               <div className="mt-10 flex justify-end gap-5">
                 <button onClick={() => { setShowAddQ(false); setSaveError(''); }} className="px-6 py-2 text-zinc-400 hover:text-zinc-300 bg-rose-800/10 hover:bg-rose-800/20 rounded-xl border active:scale-95 border-rose-600/40 cursor-pointer">Cancel</button>
-                <button onClick={handleSaveQuestion} className="btn-primary flex items-center gap-2 bg-green-600/10 hover:bg-green-600/20 border border-green-600/30 active:scale-95 text-gray-300 cursor-pointer px-4 rounded-xl py-2"><BiSave className="w-4 h-4" /> Save Question</button>
+                <button onClick={handleSaveQuestion} className="btn-primary flex items-center gap-2 bg-green-600/10 hover:bg-green-600/20 border border-green-600/30 active:scale-95 text-gray-300 cursor-pointer px-4 rounded-xl py-2"><BiSave className="w-4 h-4" /> {editingQuestion ? "Update Question" : "Save Question"}</button>
               </div>
             </div>
           )}
@@ -374,7 +447,142 @@ function QuizBuilder() {
             )}
             {quiz?.questions?.map((q: any, idx: number) => (
               <div key={q.id} className="bg-surface  border bg-zinc-900/40 border-border rounded-xl py-6 px-10 border-gray-700/30 transition-colors group">
-                <div className="flex justify-between items-start mb-4">
+                
+               {
+editingQuestionId === q.id ? (<div className="bg-zinc-900/40 border border-gray-700/30 rounded-xl p-8 transition-all">
+
+    <h3 className="text-lg font-secondary font-bold tracking-wider text-blue-400 mb-6">
+        Editing Question
+    </h3>
+
+    {/* Question */}
+    <div className="flex justify-between gap-4 mb-4">
+        <input
+            type="text"
+            placeholder="Add Question Here..."
+            className="w-full py-4 px-6 bg-transparent border border-pink-800/60 rounded-xl text-gray-200 font-secondary text-xl outline-none"
+            value={qText}
+            onChange={(e) => setQText(e.target.value)}
+        />
+
+        <div className="w-24 flex flex-col items-center justify-center">
+            <input
+                type="text"
+                placeholder="Secs"
+                className="text-center bg-green-800/20 outline-none border border-green-800 max-w-18 py-2.5 text-gray-50 font-extrabold rounded-xl"
+                value={qTime}
+                onChange={(e) => setQTime(e.target.value)}
+            />
+
+            <span className="text-xs text-green-500 tracking-widest font-bold mt-1">
+                Seconds
+            </span>
+        </div>
+    </div>
+
+    {/* Difficulty */}
+    <div className="flex items-center gap-2 mb-6">
+        <span className="text-xs text-zinc-500 font-secondary tracking-widest font-bold mr-2">
+            DIFFICULTY
+        </span>
+
+        {DIFFICULTIES.map((d) => (
+            <button
+                key={d}
+                type="button"
+                onClick={() => setQDifficulty(d)}
+                className={`text-xs px-3 py-1 rounded border font-medium cursor-pointer ${
+                    qDifficulty === d
+                        ? DIFFICULTY_STYLES[d]
+                        : "border-gray-700/50 text-zinc-500 hover:text-zinc-300"
+                }`}
+            >
+                {d}
+            </button>
+        ))}
+    </div>
+
+    {/* Answers */}
+    <div className="grid sm:grid-cols-2 gap-6">
+        {answers.map((ans, idx) => (
+            <div
+                key={idx}
+                className={`flex items-center rounded-lg overflow-hidden transition-colors ${
+                    ans.isCorrect
+                        ? "border border-green-500/50 bg-green-500/5"
+                        : "border border-amber-800/40 bg-surface"
+                }`}
+            >
+                <button
+                    type="button"
+                    onClick={() =>
+                        setAnswers(
+                            answers.map((a, i) =>
+                                i === idx
+                                    ? { ...a, isCorrect: true }
+                                    : { ...a, isCorrect: false }
+                            )
+                        )
+                    }
+                    className={`w-12 h-full flex items-center justify-center cursor-pointer ${
+                        ans.isCorrect
+                            ? "bg-green-500 text-gray-200 font-extrabold text-xl"
+                            : "bg-gray-800/30 text-zinc-500 hover:bg-white/5"
+                    }`}
+                >
+                    {ans.isCorrect ? "✓" : ""}
+                </button>
+
+                <input
+                    type="text"
+                    placeholder={`Answer ${idx + 1}`}
+                    className="w-full bg-transparent px-3 py-3 font-secondary text-gray-200 focus:outline-none"
+                    value={ans.text}
+                    onChange={(e) =>
+                        setAnswers(
+                            answers.map((a, i) =>
+                                i === idx
+                                    ? { ...a, text: e.target.value }
+                                    : a
+                            )
+                        )
+                    }
+                />
+            </div>
+        ))}
+    </div>
+
+    {saveError && (
+        <p className="text-sm text-rose-400 mt-6 font-secondary font-medium">
+            {saveError}
+        </p>
+    )}
+
+    {/* Buttons */}
+    <div className="mt-8 flex justify-end gap-4">
+        <button
+            type="button"
+            onClick={() => {
+                setEditingQuestion(null);
+                setEditingQuestionId(null);
+                setSaveError("");
+            }}
+            className="px-6 py-2 text-zinc-400 hover:text-zinc-300 bg-rose-800/10 hover:bg-rose-800/20 rounded-xl border border-rose-600/40 cursor-pointer active:scale-95"
+        >
+            Cancel
+        </button>
+
+        <button
+            type="button"
+            onClick={handleSaveQuestion}
+            className="flex items-center gap-2 bg-green-600/10 hover:bg-green-600/20 border border-green-600/30 text-gray-300 px-4 py-2 rounded-xl cursor-pointer active:scale-95"
+        >
+            <BiSave className="w-4 h-4" />
+            Update Question
+        </button>
+    </div>
+
+</div>):(             <div className="flex justify-between items-start mb-4">
                   <h3 className=" text-lg font-secondary text-gray-300 tracking-wider font-semibold">
                     <span className="text-pink-500 mr-2 font-special">{idx + 1}.</span> {q.text}</h3>
                   <div className="flex items-center gap-3">
@@ -382,6 +590,16 @@ function QuizBuilder() {
                       <span className={`text-xs px-2 py-1 rounded border font-medium ${DIFFICULTY_STYLES[q.difficulty as Difficulty] ?? DIFFICULTY_STYLES.Medium}`}>{q.difficulty}</span>
                     )}
                     <span className="bg-green-600/10  border border-white/10 px-4 py-1 font-semibold tracking-wide rounded text-xs text-zinc-400">{q.timeLimit}s</span>
+                    <button
+    onClick={() => {
+    handleEditQuestion(q);
+    setEditingQuestionId(q.id);
+}}
+    className="text-blue-400 font-semibold rounded-md border cursor-pointer border-blue-700/20 bg-blue-600/20 hover:bg-blue-600/30 px-4 py-1 flex items-center gap-1"
+  >
+    <BsPencil className="w-4 h-4" />
+    Edit
+  </button>
                     <button
                       type="button"
                       onClick={() => {
@@ -395,7 +613,8 @@ function QuizBuilder() {
                       Delete
                     </button>
                   </div>
-                </div>
+                </div>)} 
+   
                 <div className="grid sm:grid-cols-2 gap-6">
                   {q.answers.map((a: any) => (
                     <div key={a.id} className={`px-3 py-4 font-secondary font-semibold tracking-wider  rounded text-sm border ${a.isCorrect ? 'bg-green-500/10 border-green-500/20 text-green-300' : 'bg-white/5 border-gray-800/60 text-zinc-400'}`}>
