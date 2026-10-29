@@ -26,7 +26,7 @@ export const joinQuizController = async (req: Request, res: Response) => {
 
         // validate input
         if (!code || !username) {
-            return res.status(400).json({ message: "Code and username are required" });
+            return errorResponse(res, 400, "Code and username are required");
         }
 
         const quiz = await prisma.quiz.findUnique({
