@@ -440,6 +440,18 @@ export const deleteQuestionController = async (req: Request, res: Response) => {
 
 
 
+/**
+ * Thrown inside the update transaction so the rollback happens, then turned
+ * into a 409 by the handler below.
+ */
+class QuestionAlreadyPlayed extends Error {
+    constructor() {
+        super("Question already played");
+        this.name = "QuestionAlreadyPlayed";
+    }
+}
+
+
 export const updateQuestionController = async (
     req: Request,
     res: Response
@@ -500,6 +512,20 @@ export const updateQuestionController = async (
         const updatedQuestion = await prisma.$transaction(async (tx) => {
             await tx.$queryRaw`SELECT "id" FROM "Quiz" WHERE "id" = ${question.quizId} FOR UPDATE`;
 
+            // Editing replaces the answer rows, and ParticipantAnswer.answerId
+            // is SET NULL on delete, so every past player would quietly lose
+            // the record of which option they chose. A reconnecting player's
+            // selected answer is restored from that column too. Checked inside
+            // the transaction, after the row lock, so a quiz that starts
+            // between the check and the write cannot slip through.
+            const playedCount = await tx.participantAnswer.count({
+                where: { questionId: question.id }
+            });
+
+            if (playedCount > 0) {
+                throw new QuestionAlreadyPlayed();
+            }
+
 await tx.question.update({
     where: {
         id: question.id
@@ -537,6 +563,14 @@ return await tx.question.findUnique({
 
         return res.status(200).json(updatedQuestion);
     } catch (error) {
+        if (error instanceof QuestionAlreadyPlayed) {
+            return errorResponse(
+                res,
+                409,
+                "This question has already been answered by players and can no longer be edited."
+            );
+        }
+
         console.log("Update question error: ", error);
         return errorResponse(res, 500, "Internal Server Error");
     }
