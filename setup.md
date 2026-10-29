@@ -83,7 +83,7 @@ both services use the same signing secret. Compose also starts Redis and sets
 its connection variables. You do not need a separate `apps/ws-server/.env`
 for `docker compose up`.
 
-*Create a `.env` file in `/apps/genAI` (copy from `.env.example`)
+*Create a `.env` file in `/apps/genAI` (copy from `.env.example`)  
 ```bash
 cp apps/genAI/.env.example apps/genAI/.env
 ```

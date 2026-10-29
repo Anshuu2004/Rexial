@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { authMiddleware } from "../middlewares/authmiddleware";
-import { createQuestionController, createQuizController, deleteQuestionController, generateAccessCodeController, getAllQuizesController, getQuizByIdController, startQuizSessionController } from "../controllers/quizController";
+import { createQuestionController, createQuizController, deleteQuestionController, generateAccessCodeController, getAllQuizesController, getQuizByIdController, startQuizSessionController ,updateQuestionController,} from "../controllers/quizController";
 
 const router: Router = Router();
 
@@ -34,6 +34,14 @@ router.delete("/questions/:questionId", authMiddleware, deleteQuestionController
 
 // to create a session for a quiz to join using the access code
 router.post("/:quizId/start-session", authMiddleware, startQuizSessionController)
+
+
+//to edit a created question
+router.put(
+    "/:quizId/questions/:questionId",
+    authMiddleware,
+    updateQuestionController
+);
 
 
 export default router;
